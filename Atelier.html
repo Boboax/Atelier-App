@@ -809,22 +809,38 @@ window.ATELIER_REFS = [{"id": "ws-lines-1", "title": "Straight lines — set 1",
     return new Promise((res, rej) => { r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error); });
   }
 
+  // Current record/backup schema. Old records are upgraded at READ time by
+  // normalizeAttempt — no migration pass, no rewrite-in-place.
+  const ATTEMPT_SCHEMA = 2;
+  const BACKUP_VERSION = 1;
+  function normalizeAttempt(a) {
+    if (!a || a.schema >= ATTEMPT_SCHEMA) return a;
+    // schema 1 → 2: flags/fields added over time get safe defaults
+    if (a.repeat == null) a.repeat = false;
+    if (a.recall == null) a.recall = false;
+    if (a.glances == null) a.glances = 0;
+    if (a.estBias == null && a.selfEstimate != null && a.score != null) a.estBias = a.selfEstimate - a.score;
+    a.schema = ATTEMPT_SCHEMA;
+    return a;
+  }
+
   const store = {
+    ATTEMPT_SCHEMA, BACKUP_VERSION, normalizeAttempt,
     /* ---- attempts ------------------------------------------------------- */
     async addAttempt(att) {
       const os = await tx('attempts', 'readwrite');
-      const id = await reqP(os.add(Object.assign({}, att, { profileId: currentPid() })));
+      const id = await reqP(os.add(Object.assign({}, att, { profileId: currentPid(), schema: ATTEMPT_SCHEMA })));
       return id;
     },
     async allAttempts() {
       const os = await tx('attempts', 'readonly');
       const all = await reqP(os.getAll());
-      return all.filter((a) => ownAttempt(a));
+      return all.filter((a) => ownAttempt(a)).map(normalizeAttempt);
     },
     async attemptsByType(type) {
       const os = await tx('attempts', 'readonly');
       const all = await reqP(os.index('type').getAll(type));
-      return all.filter((a) => ownAttempt(a));
+      return all.filter((a) => ownAttempt(a)).map(normalizeAttempt);
     },
     async deleteAttempt(id) {
       const os = await tx('attempts', 'readwrite');
@@ -903,11 +919,14 @@ window.ATELIER_REFS = [{"id": "ws-lines-1", "title": "Straight lines — set 1",
         if (isDefault && /^atelier:[^:]+:/.test(k)) continue;   // skip other profiles' namespaced keys
         ls[k] = localStorage.getItem(k);
       }
-      return { app: 'atelier', version: 1, profile: store.profileName(), exportedAt: new Date().toISOString(),
+      return { app: 'atelier', version: BACKUP_VERSION, profile: store.profileName(), exportedAt: new Date().toISOString(),
                localStorage: ls, attempts, userRefs };
     },
     async importAll(data, { merge } = { merge: false }) {   // restores INTO the active profile
       if (!data || data.app !== 'atelier') throw new Error('Not an Atelier backup file.');
+      if (data.version && data.version > BACKUP_VERSION) {
+        throw new Error('This backup is from a newer version of Atelier — update the app first.');
+      }
       if (!merge) {
         await store.clearAttempts();
         // a clean restore replaces the profile's settings too — keys earned
@@ -1907,6 +1926,29 @@ window.ATELIER_REFS = [{"id": "ws-lines-1", "title": "Straight lines — set 1",
         .map((e) => ({ key: e.key, due: this.dueIn(e.key, todayKey) }))
         .filter((d) => d.due <= 0)
         .sort((a, b) => a.due - b.due);
+    },
+
+    // Reference (Module 4) drills join the spaced schedule too: each completion
+    // moves the drill up a box (longer interval), so plates come due for review
+    // like everything else instead of vanishing after the first try.
+    touchRef(key, day) {
+      const d = BY_KEY[key];
+      if (!d || d.scored) return;
+      const s = this._state();
+      const st = s[key] || (s[key] = {});
+      const sch = st.sched || (st.sched = { box: 0, last: '', count: 0 });
+      sch.count = (sch.count || 0) + 1;
+      sch.box = Math.min(INTERVALS.length - 1, Math.floor(sch.count / 2));   // 2 completions per box
+      sch.last = day || sch.last;
+      this._save(s);
+    },
+    // tried reference drills due for review, most overdue first
+    dueRefs(todayKey) {
+      const s = this._state();
+      return EXERCISES.filter((e) => !e.scored && s[e.key] && s[e.key].sched && s[e.key].sched.last)
+        .map((e) => ({ key: e.key, due: this.dueIn(e.key, todayKey) }))
+        .filter((d) => d.due <= 0)
+        .sort((a, b) => a.due - b.due);
     }
   };
 
@@ -1927,6 +1969,17 @@ window.ATELIER_REFS = [{"id": "ws-lines-1", "title": "Straight lines — set 1",
     goalMin() { return this.data().goalMin; },
     setGoal(min) { const d = this.data(); d.goalMin = min; this.save(d); },
 
+    // Daily goal mode: 'plan' (default — complete today's plan segments; quality
+    // over time-on-task) or 'minutes' (the legacy raw-minutes goal).
+    goalMode() { return A.store.get('goalMode', 'plan'); },
+    setGoalMode(m) { A.store.set('goalMode', m === 'minutes' ? 'minutes' : 'plan'); },
+    planDays() { return A.store.get('planDays', {}); },
+    markPlanDone(dayKey) {
+      const p = this.planDays();
+      if (!p[dayKey]) { p[dayKey] = true; A.store.set('planDays', p); return true; }
+      return false;
+    },
+
     // add an attempt's time to today's tally
     touch(seconds) {
       const d = this.data();
@@ -1945,10 +1998,13 @@ window.ATELIER_REFS = [{"id": "ws-lines-1", "title": "Straight lines — set 1",
       const day = d.days[today()];
       return day ? day.count : 0;
     },
+    // a day counts if the plan was completed OR the minutes goal was met —
+    // the union keeps old minute-based history valid after switching modes
     metGoalOn(dayKey) {
+      if (this.planDays()[dayKey]) return true;
       const d = this.data();
       const day = d.days[dayKey];
-      return day && (day.secs / 60) >= d.goalMin;
+      return !!(day && (day.secs / 60) >= d.goalMin);
     },
     // consecutive days up to today meeting the goal. A missed day is forgiven
     // (as a "rest day") when the 7 days before it were all met — earned rest
@@ -4671,10 +4727,23 @@ window.ATELIER_REFS = [{"id": "ws-lines-1", "title": "Straight lines — set 1",
 
   async function exportBackup() {
     const data = await A.store.exportAll();
+    const name = 'atelier-backup-' + A.habit.today() + '.json';
     const blob = new Blob([JSON.stringify(data)], { type: 'application/json' });
+    // Web Share with a file is one tap → "Save to Files"/Dropbox on an installed
+    // iPad PWA — much nicer than the <a download> flow, which is awkward in
+    // standalone mode. Feature-detect and fall back.
+    try {
+      const file = new File([blob], name, { type: 'application/json' });
+      if (navigator.canShare && navigator.canShare({ files: [file] })) {
+        await navigator.share({ files: [file], title: 'Atelier backup' });
+        A.store.set('lastBackup', Date.now());
+        toast('Backup shared');
+        return;
+      }
+    } catch (e) { if (e && e.name === 'AbortError') return; /* user cancelled — no backup */ }
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
-    a.href = url; a.download = 'atelier-backup-' + A.habit.today() + '.json';
+    a.href = url; a.download = name;
     document.body.appendChild(a); a.click(); a.remove();
     setTimeout(() => URL.revokeObjectURL(url), 1000);
     A.store.set('lastBackup', Date.now());
@@ -4742,10 +4811,10 @@ window.ATELIER_REFS = [{"id": "ws-lines-1", "title": "Straight lines — set 1",
    ========================================================================== */
 (function (A) {
   'use strict';
-  // Both are stamped at build time from build/version.json (A.VERSION) and the build
-  // clock (A.BUILD, YYMMDD.HHMM). These literals are only the un-built dev fallback.
-  A.VERSION = '1.3.9';
-  A.BUILD = '260703.1733';
+  // Stamped by build/build.js: A.VERSION from build/version.json, A.BUILD from
+  // the build clock (YYMMDD.HHMM). These literals are only the un-built dev fallback.
+  A.VERSION = '1.4.0';
+  A.BUILD = '260703.1846';
   function boot() {
     try { A.ui.init(); }
     catch (e) {
@@ -4780,6 +4849,10 @@ window.ATELIER_REFS = [{"id": "ws-lines-1", "title": "Straight lines — set 1",
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot);
   else boot();
+
+  // Ask iOS not to evict our storage (installed PWAs are usually granted) —
+  // one line of insurance against the ~4-week idle wipe.
+  try { if (navigator.storage && navigator.storage.persist) navigator.storage.persist().catch(() => {}); } catch (_) {}
 
   // Register the service worker only when served over http(s) (not file://).
   if ('serviceWorker' in navigator && location.protocol.startsWith('http')) {

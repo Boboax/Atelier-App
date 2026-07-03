@@ -1308,10 +1308,23 @@
 
   async function exportBackup() {
     const data = await A.store.exportAll();
+    const name = 'atelier-backup-' + A.habit.today() + '.json';
     const blob = new Blob([JSON.stringify(data)], { type: 'application/json' });
+    // Web Share with a file is one tap → "Save to Files"/Dropbox on an installed
+    // iPad PWA — much nicer than the <a download> flow, which is awkward in
+    // standalone mode. Feature-detect and fall back.
+    try {
+      const file = new File([blob], name, { type: 'application/json' });
+      if (navigator.canShare && navigator.canShare({ files: [file] })) {
+        await navigator.share({ files: [file], title: 'Atelier backup' });
+        A.store.set('lastBackup', Date.now());
+        toast('Backup shared');
+        return;
+      }
+    } catch (e) { if (e && e.name === 'AbortError') return; /* user cancelled — no backup */ }
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
-    a.href = url; a.download = 'atelier-backup-' + A.habit.today() + '.json';
+    a.href = url; a.download = name;
     document.body.appendChild(a); a.click(); a.remove();
     setTimeout(() => URL.revokeObjectURL(url), 1000);
     A.store.set('lastBackup', Date.now());

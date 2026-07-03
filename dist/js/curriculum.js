@@ -138,6 +138,29 @@
         .map((e) => ({ key: e.key, due: this.dueIn(e.key, todayKey) }))
         .filter((d) => d.due <= 0)
         .sort((a, b) => a.due - b.due);
+    },
+
+    // Reference (Module 4) drills join the spaced schedule too: each completion
+    // moves the drill up a box (longer interval), so plates come due for review
+    // like everything else instead of vanishing after the first try.
+    touchRef(key, day) {
+      const d = BY_KEY[key];
+      if (!d || d.scored) return;
+      const s = this._state();
+      const st = s[key] || (s[key] = {});
+      const sch = st.sched || (st.sched = { box: 0, last: '', count: 0 });
+      sch.count = (sch.count || 0) + 1;
+      sch.box = Math.min(INTERVALS.length - 1, Math.floor(sch.count / 2));   // 2 completions per box
+      sch.last = day || sch.last;
+      this._save(s);
+    },
+    // tried reference drills due for review, most overdue first
+    dueRefs(todayKey) {
+      const s = this._state();
+      return EXERCISES.filter((e) => !e.scored && s[e.key] && s[e.key].sched && s[e.key].sched.last)
+        .map((e) => ({ key: e.key, due: this.dueIn(e.key, todayKey) }))
+        .filter((d) => d.due <= 0)
+        .sort((a, b) => a.due - b.due);
     }
   };
 
@@ -158,6 +181,17 @@
     goalMin() { return this.data().goalMin; },
     setGoal(min) { const d = this.data(); d.goalMin = min; this.save(d); },
 
+    // Daily goal mode: 'plan' (default — complete today's plan segments; quality
+    // over time-on-task) or 'minutes' (the legacy raw-minutes goal).
+    goalMode() { return A.store.get('goalMode', 'plan'); },
+    setGoalMode(m) { A.store.set('goalMode', m === 'minutes' ? 'minutes' : 'plan'); },
+    planDays() { return A.store.get('planDays', {}); },
+    markPlanDone(dayKey) {
+      const p = this.planDays();
+      if (!p[dayKey]) { p[dayKey] = true; A.store.set('planDays', p); return true; }
+      return false;
+    },
+
     // add an attempt's time to today's tally
     touch(seconds) {
       const d = this.data();
@@ -176,10 +210,13 @@
       const day = d.days[today()];
       return day ? day.count : 0;
     },
+    // a day counts if the plan was completed OR the minutes goal was met —
+    // the union keeps old minute-based history valid after switching modes
     metGoalOn(dayKey) {
+      if (this.planDays()[dayKey]) return true;
       const d = this.data();
       const day = d.days[dayKey];
-      return day && (day.secs / 60) >= d.goalMin;
+      return !!(day && (day.secs / 60) >= d.goalMin);
     },
     // consecutive days up to today meeting the goal. A missed day is forgiven
     // (as a "rest day") when the 7 days before it were all met — earned rest

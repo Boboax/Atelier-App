@@ -15,14 +15,17 @@ const DIST = path.join(ROOT, 'dist');
 const read = (p) => fs.readFileSync(path.join(SRC, p), 'utf8');
 const readB64 = (p) => fs.readFileSync(path.join(SRC, p)).toString('base64');
 
-// build stamp: YYMMDD.HHMM — becomes the SW cache name and A.BUILD
+// build stamp: YYMMDD.HHMM — becomes the SW cache name and A.BUILD.
+// Overridable via env (BUILD=ci) so CI can build deterministically.
 const now = new Date();
 const p2 = (n) => String(n).padStart(2, '0');
-const BUILD = String(now.getFullYear()).slice(2) + p2(now.getMonth() + 1) + p2(now.getDate()) +
-              '.' + p2(now.getHours()) + p2(now.getMinutes());
+const BUILD = process.env.BUILD ||
+  (String(now.getFullYear()).slice(2) + p2(now.getMonth() + 1) + p2(now.getDate()) +
+   '.' + p2(now.getHours()) + p2(now.getMinutes()));
+const VERSION = JSON.parse(fs.readFileSync(path.join(__dirname, 'version.json'), 'utf8')).version;
 
-// keep in the order index.html loads them (dependencies bind at call time,
-// but a single source of truth avoids drift)
+// THE single source of module load order. index.html and sw.js each carry a
+// copy; the checks below fail the build the moment either drifts.
 const JS_ORDER = [
   'data/refs.js',
   'js/geometry.js', 'js/storage.js', 'js/generators.js', 'js/canvas.js',
@@ -30,7 +33,28 @@ const JS_ORDER = [
   'js/history.js', 'js/imgscore.js', 'js/ui.js', 'js/app.js'
 ];
 
-const stampApp = (js) => js.replace(/A\.BUILD = '[^']*'/, "A.BUILD = '" + BUILD + "'");
+// drift guards — three copies of the module list have already diverged once
+const htmlOrder = [...read('index.html').matchAll(/<script src="([^"]+)"><\/script>/g)].map((m) => m[1]);
+if (htmlOrder.join() !== JS_ORDER.join()) {
+  console.error('BUILD FAILED: index.html <script> order differs from JS_ORDER in build.js');
+  console.error('  index.html:', htmlOrder.join(', '));
+  console.error('  JS_ORDER:  ', JS_ORDER.join(', '));
+  process.exit(1);
+}
+const swSrc = read('sw.js');
+for (const f of JS_ORDER) {
+  if (!swSrc.includes("'" + f + "'")) {
+    console.error('BUILD FAILED: sw.js ASSETS is missing ' + f);
+    process.exit(1);
+  }
+}
+
+const stampApp = (js) => js
+  .replace(/A\.BUILD = '[^']*'/, "A.BUILD = '" + BUILD + "'")
+  .replace(/A\.VERSION = '[^']*'/, "A.VERSION = '" + VERSION + "'");
+
+module.exports = { JS_ORDER, SRC };   // reused by the Node test harness
+if (require.main !== module) return;  // require()d for JS_ORDER only — don't build
 
 /* ---- 1. dist/ ----------------------------------------------------------- */
 fs.rmSync(DIST, { recursive: true, force: true });

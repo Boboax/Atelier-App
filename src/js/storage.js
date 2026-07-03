@@ -64,22 +64,38 @@
     return new Promise((res, rej) => { r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error); });
   }
 
+  // Current record/backup schema. Old records are upgraded at READ time by
+  // normalizeAttempt — no migration pass, no rewrite-in-place.
+  const ATTEMPT_SCHEMA = 2;
+  const BACKUP_VERSION = 1;
+  function normalizeAttempt(a) {
+    if (!a || a.schema >= ATTEMPT_SCHEMA) return a;
+    // schema 1 → 2: flags/fields added over time get safe defaults
+    if (a.repeat == null) a.repeat = false;
+    if (a.recall == null) a.recall = false;
+    if (a.glances == null) a.glances = 0;
+    if (a.estBias == null && a.selfEstimate != null && a.score != null) a.estBias = a.selfEstimate - a.score;
+    a.schema = ATTEMPT_SCHEMA;
+    return a;
+  }
+
   const store = {
+    ATTEMPT_SCHEMA, BACKUP_VERSION, normalizeAttempt,
     /* ---- attempts ------------------------------------------------------- */
     async addAttempt(att) {
       const os = await tx('attempts', 'readwrite');
-      const id = await reqP(os.add(Object.assign({}, att, { profileId: currentPid() })));
+      const id = await reqP(os.add(Object.assign({}, att, { profileId: currentPid(), schema: ATTEMPT_SCHEMA })));
       return id;
     },
     async allAttempts() {
       const os = await tx('attempts', 'readonly');
       const all = await reqP(os.getAll());
-      return all.filter((a) => ownAttempt(a));
+      return all.filter((a) => ownAttempt(a)).map(normalizeAttempt);
     },
     async attemptsByType(type) {
       const os = await tx('attempts', 'readonly');
       const all = await reqP(os.index('type').getAll(type));
-      return all.filter((a) => ownAttempt(a));
+      return all.filter((a) => ownAttempt(a)).map(normalizeAttempt);
     },
     async deleteAttempt(id) {
       const os = await tx('attempts', 'readwrite');
@@ -158,11 +174,14 @@
         if (isDefault && /^atelier:[^:]+:/.test(k)) continue;   // skip other profiles' namespaced keys
         ls[k] = localStorage.getItem(k);
       }
-      return { app: 'atelier', version: 1, profile: store.profileName(), exportedAt: new Date().toISOString(),
+      return { app: 'atelier', version: BACKUP_VERSION, profile: store.profileName(), exportedAt: new Date().toISOString(),
                localStorage: ls, attempts, userRefs };
     },
     async importAll(data, { merge } = { merge: false }) {   // restores INTO the active profile
       if (!data || data.app !== 'atelier') throw new Error('Not an Atelier backup file.');
+      if (data.version && data.version > BACKUP_VERSION) {
+        throw new Error('This backup is from a newer version of Atelier — update the app first.');
+      }
       if (!merge) {
         await store.clearAttempts();
         // a clean restore replaces the profile's settings too — keys earned

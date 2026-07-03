@@ -3,10 +3,10 @@
    ========================================================================== */
 (function (A) {
   'use strict';
-  // Both are stamped at build time from build/version.json (A.VERSION) and the build
-  // clock (A.BUILD, YYMMDD.HHMM). These literals are only the un-built dev fallback.
-  A.VERSION = '1.3.9';
-  A.BUILD = '260703.1733';
+  // Stamped by build/build.js: A.VERSION from build/version.json, A.BUILD from
+  // the build clock (YYMMDD.HHMM). These literals are only the un-built dev fallback.
+  A.VERSION = '1.4.0';
+  A.BUILD = '260703.1846';
   function boot() {
     try { A.ui.init(); }
     catch (e) {
@@ -41,6 +41,10 @@
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot);
   else boot();
+
+  // Ask iOS not to evict our storage (installed PWAs are usually granted) —
+  // one line of insurance against the ~4-week idle wipe.
+  try { if (navigator.storage && navigator.storage.persist) navigator.storage.persist().catch(() => {}); } catch (_) {}
 
   // Register the service worker only when served over http(s) (not file://).
   if ('serviceWorker' in navigator && location.protocol.startsWith('http')) {
