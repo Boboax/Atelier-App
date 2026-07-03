@@ -17,7 +17,7 @@
   const rnd = (a, b) => a + Math.random() * (b - a);
 
   // --- progression (self-contained; mirrors the main curriculum's adaptive rule) ---
-  const TH_ADV = 85, TH_REG = 45, WIN = 5, MAXLVL = 8;
+  const TH_ADV = 85, TH_REG = 60, WIN = 5, MAXLVL = 8;   // pull toward the 85% sweet spot from both sides
   function lvlState() { return A.store.get('percLevel', { angle: 1, prop: 1 }); }
   function lvlOf(kind) { return lvlState()[kind] || 1; }
   function recordLevel(kind, score) {
@@ -77,7 +77,11 @@
     stim = el.querySelector('#p-stim'); ctrl = el.querySelector('#p-ctrl');
     el.querySelector('#p-close').addEventListener('click', close);
   }
-  function close() { clearInterval(st.timer); el.classList.remove('on'); if (A.ui) A.ui.go(A.ui.view); }
+  function close() {
+    clearInterval(st.timer); el.classList.remove('on');
+    if (A.ui && A.ui.invalidate) A.ui.invalidate();   // Home must see the fresh warm-up attempts
+    if (A.ui) A.ui.go(A.ui.view);
+  }
 
   // --- stimulus + preview rendering ---------------------------------------
   function angleSVG(deg, color, w) {
@@ -126,15 +130,19 @@
   function recall() {
     timerEl.textContent = ''; setRing(0, false, ''); st.t0 = performance.now();
     instr.textContent = st.kind === 'angle' ? 'Set the line to the angle you saw.' : 'Set the right bar to match.';
+    // randomised start anchor: a fixed start (90° / 60%) lets the eye learn
+    // "distance from the anchor" instead of the quantity itself, and method-of-
+    // adjustment answers drift toward the anchor. Start somewhere new each time
+    // (kept a margin away from the truth so there's always a real adjustment).
     if (st.kind === 'angle') {
-      st.guess = 90;
+      do { st.guess = Math.round(rnd(5, 174)); } while (Math.abs(st.guess - st.truth) < 20);
       stim.innerHTML = svgBox(angleSVG(st.guess, 'var(--accent)'));
-      ctrl.innerHTML = `<div class="opacityctl"><input type="range" id="p-range" min="0" max="179" value="90"></div>
+      ctrl.innerHTML = `<div class="opacityctl"><input type="range" id="p-range" min="0" max="179" value="${st.guess}"></div>
         <button class="btn block" id="p-submit" style="margin-top:12px">Reveal ›</button>`;
     } else {
-      st.guess = 0.6;
+      do { st.guess = Math.round(rnd(15, 105)) / 100; } while (Math.abs(st.guess - st.truth) < 0.12);
       stim.innerHTML = svgBox(barsSVG(st.guess));
-      ctrl.innerHTML = `<div class="opacityctl"><input type="range" id="p-range" min="10" max="110" value="60"></div>
+      ctrl.innerHTML = `<div class="opacityctl"><input type="range" id="p-range" min="10" max="110" value="${Math.round(st.guess * 100)}"></div>
         <button class="btn block" id="p-submit" style="margin-top:12px">Reveal ›</button>`;
     }
     const range = el.querySelector('#p-range');
@@ -151,7 +159,11 @@
     if (st.kind === 'angle') {
       let err = Math.abs(st.guess - st.truth); if (err > 90) err = 180 - err;
       score = Math.max(0, Math.round(100 - err * 3));
-      metrics = { angleErrDeg: +(st.guess - st.truth).toFixed(1) };
+      // fold the SIGNED error the same way (undirected line): a 170°-vs-5°
+      // miss is a 15° error, not −165°, or one wrap-around swamps the bias mean
+      let se = st.guess - st.truth;
+      if (se > 90) se -= 180; else if (se <= -90) se += 180;
+      metrics = { angleErrDeg: +se.toFixed(1) };
       label = `You: ${st.guess}° · actual: ${st.truth}° · off ${Math.round(err)}°`;
       stim.innerHTML = svgBox(angleSVG(st.truth, 'var(--ink)', 4) + angleSVG(st.guess, 'var(--accent)', 2));
     } else {

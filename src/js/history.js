@@ -36,11 +36,17 @@
         const d = 'M' + cv.map((p) => M(p[0]) + ',' + M(p[1])).join(' L');
         g += `<path d="${d}" fill="none" stroke="rgba(0,0,0,0.4)" stroke-width="1.5"/>`;
       });
-      // user marks (ink)
+      // user marks — fixed dark ink: the thumb is a white "paper" swatch in both
+      // themes (var(--ink) goes light in dark mode and would vanish on it)
       (att.strokes || []).forEach((s) => {
         if (s.length < 2) return;
-        const d = 'M' + s.map((p) => M(p[0]) + ',' + M(p[1])).join(' L');
-        g += `<path d="${d}" fill="none" stroke="var(--ink)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>`;
+        // decimate: pre-RDP attempts carry raw coalesced Pencil points — at
+        // thumbnail size anything past ~60 points per stroke is invisible,
+        // and 200 thumbs × dense paths used to jank the History screen
+        let pts = s;
+        if (pts.length > 60) { const step = Math.ceil(pts.length / 60); pts = pts.filter((_, i) => i % step === 0 || i === s.length - 1); }
+        const d = 'M' + pts.map((p) => M(p[0]) + ',' + M(p[1])).join(' L');
+        g += `<path d="${d}" fill="none" stroke="#1a1a1a" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>`;
       });
       return `<svg viewBox="0 0 ${S} ${S}" class="thumb"><rect width="${S}" height="${S}" fill="#fff"/>${g}</svg>`;
     },
@@ -51,8 +57,9 @@
       ctx.clearRect(0, 0, S, S); ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, S, S);
       const M = (v) => v * (S - 12) + 6;
       const tp = targetPathsDesign(att);
+      const lw = Math.max(1.5, S / 240);      // callers pass device px (DPR-scaled) — keep weights proportional
       ctx.save();
-      ctx.strokeStyle = 'rgba(0,0,0,0.35)'; ctx.fillStyle = 'rgba(0,0,0,0.06)'; ctx.lineWidth = 1.5;
+      ctx.strokeStyle = 'rgba(0,0,0,0.35)'; ctx.fillStyle = 'rgba(0,0,0,0.06)'; ctx.lineWidth = lw;
       tp.polys.forEach((poly) => {
         ctx.beginPath(); ctx.moveTo(M(poly[0][0]), M(poly[0][1]));
         for (let i = 1; i < poly.length; i++) ctx.lineTo(M(poly[i][0]), M(poly[i][1]));
@@ -65,7 +72,7 @@
       const strokes = att.strokes || [];
       const totalPts = strokes.reduce((n, s) => n + s.length, 0);
       let budget = Math.round(totalPts * progress);
-      ctx.strokeStyle = '#1a1a1a'; ctx.lineWidth = 2.4; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+      ctx.strokeStyle = '#1a1a1a'; ctx.lineWidth = lw * 1.6; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
       for (const s of strokes) {
         if (budget <= 0) break;
         const n = Math.min(s.length, budget); budget -= s.length;

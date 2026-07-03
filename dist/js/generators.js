@@ -131,7 +131,7 @@
     }
     let poly = pts;
     if (level <= 2) poly = A.geom.convexHull(pts);
-    if (poly.length < 3) poly = A.geom.convexHull(pts);
+    if (poly.length < 3) poly = pts;          // collinear hull — fall back to the raw ring
     return { kind: 'polygon', polygon: fitToBox(poly, 0.13) };
   };
 

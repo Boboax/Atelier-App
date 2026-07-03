@@ -57,7 +57,12 @@
   const BY_KEY = {};
   EXERCISES.forEach((e) => (BY_KEY[e.key] = e));
 
-  const ADVANCE = 85, REGRESS = 45, WINDOW = 5;
+  // ADVANCE per the "85% rule"; REGRESS at 60 rather than deep-frustration 45 —
+  // difficulty should be pulled TOWARD the ~85% sweet spot from both sides, not
+  // leave the learner grinding a level they clear only half the time.
+  const ADVANCE = 85, REGRESS = 60, WINDOW = 5;
+  // spaced-repetition boxes (Leitner): review interval in days per box
+  const INTERVALS = [1, 2, 4, 7, 14];
 
   const curr = {
     EXERCISES,
@@ -107,8 +112,32 @@
         if (mean >= ADVANCE && weakest >= 70 && days >= 2 && st.level < d.maxLevel) { st.level++; st.window = []; changed = true; dir = 1; }
         else if (mean <= REGRESS && st.level > 1) { st.level--; st.window = []; changed = true; dir = -1; }
       }
+      // spaced-repetition state (Leitner-lite): a drill that just promoted moves
+      // to a longer review interval; one that regressed comes back sooner.
+      const sch = st.sched || (st.sched = { box: 0, last: '' });
+      if (changed) sch.box = Math.max(0, Math.min(INTERVALS.length - 1, sch.box + dir));
+      sch.last = day || sch.last;
       this._save(s);
       return { changed, dir, level: st.level };
+    },
+
+    // days until a drill is due for review (negative = overdue). Never-practised
+    // scored drills report 0 (due now).
+    dueIn(key, todayKey) {
+      const s = this._state();
+      const st = s[key];
+      if (!st || !st.sched || !st.sched.last) return 0;
+      const parse = (k) => { const p = k.split('-'); return Date.UTC(+p[0], +p[1] - 1, +p[2]); };
+      const elapsed = Math.round((parse(todayKey) - parse(st.sched.last)) / 864e5);
+      return INTERVALS[Math.min(st.sched.box, INTERVALS.length - 1)] - elapsed;
+    },
+
+    // scored drills due (or overdue) for review today, most overdue first
+    dueDrills(todayKey) {
+      return EXERCISES.filter((e) => e.scored)
+        .map((e) => ({ key: e.key, due: this.dueIn(e.key, todayKey) }))
+        .filter((d) => d.due <= 0)
+        .sort((a, b) => a.due - b.due);
     }
   };
 
@@ -152,13 +181,22 @@
       const day = d.days[dayKey];
       return day && (day.secs / 60) >= d.goalMin;
     },
-    // consecutive days up to today meeting the goal
+    // consecutive days up to today meeting the goal. A missed day is forgiven
+    // (as a "rest day") when the 7 days before it were all met — earned rest
+    // shouldn't zero a habit (streak fragility is a known abandonment trigger).
+    // At most 2 rest days per streak.
     streak() {
-      let n = 0;
+      let n = 0, rests = 0;
       for (let i = 0; ; i++) {
-        if (this.metGoalOn(dayOffset(-i))) n++;
-        else if (i === 0) continue;       // today not yet met → keep counting prior days
-        else break;
+        const day = dayOffset(-i);
+        if (this.metGoalOn(day)) { n++; continue; }
+        if (i === 0) continue;            // today not yet met → keep counting prior days
+        if (rests < 2) {
+          let priorRun = true;
+          for (let j = 1; j <= 7; j++) if (!this.metGoalOn(dayOffset(-i - j))) { priorRun = false; break; }
+          if (priorRun) { rests++; continue; }   // earned rest day — streak survives
+        }
+        break;
       }
       return n;
     },

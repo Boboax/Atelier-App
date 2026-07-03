@@ -1,15 +1,28 @@
-/* Build a single self-contained Atelier.html from src/ — everything inlined
-   (CSS, JS, bundled images, manifest, icons) so it runs fully offline from a
-   plain file with no server, no network, no service worker required.
+/* Build Atelier from src/ — the ONE build step. Produces:
+     1. dist/          — the deployable PWA (src copied verbatim, with the
+                         service-worker CACHE and A.BUILD stamped from the
+                         build clock, so every build invalidates the old cache)
+     2. Atelier.html   — a single self-contained file (CSS, JS, bundled images,
+                         manifest, icons all inlined) that runs fully offline
+                         from a plain file with no server and no service worker.
    Usage:  node build/build.js   (run from the Atelier folder) */
 const fs = require('fs');
 const path = require('path');
 
 const ROOT = path.join(__dirname, '..');
 const SRC = path.join(ROOT, 'src');
+const DIST = path.join(ROOT, 'dist');
 const read = (p) => fs.readFileSync(path.join(SRC, p), 'utf8');
 const readB64 = (p) => fs.readFileSync(path.join(SRC, p)).toString('base64');
 
+// build stamp: YYMMDD.HHMM — becomes the SW cache name and A.BUILD
+const now = new Date();
+const p2 = (n) => String(n).padStart(2, '0');
+const BUILD = String(now.getFullYear()).slice(2) + p2(now.getMonth() + 1) + p2(now.getDate()) +
+              '.' + p2(now.getHours()) + p2(now.getMinutes());
+
+// keep in the order index.html loads them (dependencies bind at call time,
+// but a single source of truth avoids drift)
 const JS_ORDER = [
   'data/refs.js',
   'js/geometry.js', 'js/storage.js', 'js/generators.js', 'js/canvas.js',
@@ -17,8 +30,30 @@ const JS_ORDER = [
   'js/history.js', 'js/imgscore.js', 'js/ui.js', 'js/app.js'
 ];
 
+const stampApp = (js) => js.replace(/A\.BUILD = '[^']*'/, "A.BUILD = '" + BUILD + "'");
+
+/* ---- 1. dist/ ----------------------------------------------------------- */
+fs.rmSync(DIST, { recursive: true, force: true });
+const copyDir = (from, to) => {
+  fs.mkdirSync(to, { recursive: true });
+  for (const ent of fs.readdirSync(from, { withFileTypes: true })) {
+    const f = path.join(from, ent.name), t = path.join(to, ent.name);
+    if (ent.isDirectory()) copyDir(f, t);
+    else fs.copyFileSync(f, t);
+  }
+};
+copyDir(SRC, DIST);
+fs.rmSync(path.join(DIST, 'tests.html'), { force: true });          // dev-only
+fs.writeFileSync(path.join(DIST, 'sw.js'), read('sw.js').replace('__BUILD__', BUILD));
+fs.writeFileSync(path.join(DIST, 'js/app.js'), stampApp(read('js/app.js')));
+if (!fs.existsSync(path.join(DIST, 'robots.txt'))) {
+  fs.writeFileSync(path.join(DIST, 'robots.txt'), 'User-agent: *\nDisallow: /\n');
+}
+
+/* ---- 2. Atelier.html ----------------------------------------------------- */
 const css = read('styles.css');
-const js = JS_ORDER.map((f) => '\n/* ===== ' + f + ' ===== */\n' + read(f)).join('\n');
+const js = JS_ORDER.map((f) => '\n/* ===== ' + f + ' ===== */\n' +
+  (f === 'js/app.js' ? stampApp(read(f)) : read(f))).join('\n');
 
 // inline manifest with data-URI icons
 const manifest = JSON.parse(read('manifest.webmanifest'));
@@ -39,9 +74,10 @@ const html = `<!DOCTYPE html>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no, maximum-scale=1">
 <meta name="apple-mobile-web-app-capable" content="yes">
-<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="Atelier">
-<meta name="theme-color" content="#f6f3ec">
+<meta name="theme-color" content="#f6f3ec" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#211d18" media="(prefers-color-scheme: dark)">
 <link rel="manifest" href="${manifestDataUri}">
 <link rel="apple-touch-icon" href="${touch}">
 <title>Atelier — memory drawing trainer</title>
@@ -61,4 +97,6 @@ ${js}
 const out = path.join(ROOT, 'Atelier.html');
 fs.writeFileSync(out, html);
 const kb = Math.round(Buffer.byteLength(html) / 1024);
-console.log('Wrote ' + out + '  (' + kb + ' KB)');
+console.log('Build ' + BUILD);
+console.log('  dist/         refreshed (SW cache atelier-' + BUILD + ')');
+console.log('  Atelier.html  ' + kb + ' KB');

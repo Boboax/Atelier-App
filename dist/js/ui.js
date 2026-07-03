@@ -47,9 +47,9 @@
     document.body.appendChild(app);
 
     const nav = el(`<div class="nav">
-      ${navBtn('home', '⌂', 'Home')}${navBtn('practice', '✎', 'Exercises')}
-      ${navBtn('stats', '◷', 'Stats')}${navBtn('history', '▦', 'History')}
-      ${navBtn('more', '⋯', 'More')}</div>`);
+      ${navBtn('home', ICONS.home, 'Home')}${navBtn('practice', ICONS.pencil, 'Exercises')}
+      ${navBtn('stats', ICONS.chart, 'Stats')}${navBtn('history', ICONS.grid, 'History')}
+      ${navBtn('more', ICONS.dots, 'More')}</div>`);
     document.body.appendChild(nav);
     nav.addEventListener('click', (e) => { const b = e.target.closest('[data-nav]'); if (b) ui.go(b.dataset.nav); });
     $('.topbar', app).addEventListener('click', (e) => { const b = e.target.closest('[data-go]'); if (b) ui.go(b.dataset.go); });
@@ -61,7 +61,16 @@
     ui.go('home');
     if (!A.store.get('onboarded', false)) showOnboarding();
   };
-  function navBtn(id, ic, label) { return `<button data-nav="${id}"><span class="ic">${ic}</span>${label}</button>`; }
+  function navBtn(id, ic, label) { return `<button data-nav="${id}" aria-label="${label}"><span class="ic">${ic}</span>${label}</button>`; }
+  // drawn stroke icons (currentColor) — font glyphs render as emoji/tofu on some stacks
+  const I = (d) => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${d}</svg>`;
+  const ICONS = {
+    home: I('<path d="M4 11.2 12 4l8 7.2"/><path d="M6.2 9.6V20h11.6V9.6"/>'),
+    pencil: I('<path d="M4 20l1.2-4.2L16.6 4.4a1.7 1.7 0 0 1 2.4 0l.6.6a1.7 1.7 0 0 1 0 2.4L8.2 18.8 4 20z"/><path d="M14.8 6.2l3 3"/>'),
+    chart: I('<path d="M4 20h16"/><path d="M7 16v-5"/><path d="M12 16V7"/><path d="M17 16v-8"/>'),
+    grid: I('<rect x="4.5" y="4.5" width="6" height="6" rx="1"/><rect x="13.5" y="4.5" width="6" height="6" rx="1"/><rect x="4.5" y="13.5" width="6" height="6" rx="1"/><rect x="13.5" y="13.5" width="6" height="6" rx="1"/>'),
+    dots: I('<circle cx="5.5" cy="12" r="1.4" fill="currentColor" stroke="none"/><circle cx="12" cy="12" r="1.4" fill="currentColor" stroke="none"/><circle cx="18.5" cy="12" r="1.4" fill="currentColor" stroke="none"/>')
+  };
 
   ui.go = function (view) {
     ui.view = view;
@@ -69,6 +78,8 @@
     $$('.nav button').forEach((b) => b.classList.toggle('active', b.dataset.nav === view || (moreViews.indexOf(view) >= 0 && b.dataset.nav === 'more')));
     const v = $('#view');
     v.scrollTop = 0;
+    // re-trigger the entrance fade — innerHTML swaps don't restart CSS animations
+    v.style.animation = 'none'; void v.offsetWidth; v.style.animation = '';
     if (view === 'home') renderHome(v);
     else if (view === 'practice') renderPractice(v);
     else if (view === 'stats') renderStats(v);
@@ -91,7 +102,7 @@
         btn: 'Warm up' };
     }
     if (sv) return { step: 'resume', exKey: '', title: 'Resume ' + (sv.kind === 'warmup' ? 'quick session' : 'mixed session'), sub: sv.completed + '/' + sv.queue.length + ' done today', btn: 'Resume' };
-    const btns = { warmup: 'Warm up', mixed: 'Start', resume: 'Resume', reference: 'Try', build: 'Practice' };
+    const btns = { warmup: 'Warm up', mixed: 'Start', resume: 'Resume', reference: 'Try', build: 'Practice', recall: 'Test me' };
     return { step: r.step, exKey: r.exKey || '', title: r.title, sub: r.sub, btn: btns[r.step] || 'Practice' };
   }
   // big "Recommended now" card — used on Home only (the dashboard)
@@ -111,10 +122,39 @@
       <button class="btn soft sm" data-rec="${a.step}" data-recex="${esc(a.exKey)}">${a.btn} ›</button></div></div>`;
   }
   function doRec(step, exKey) {
-    if (step === 'warmup') A.Perceive.start('angle');
+    if (step === 'warmup') startWarmup();
     else if (step === 'build' || step === 'reference') startExercise(exKey);
+    else if (step === 'recall') startRecall();
     else if (step === 'resume') resumeSession();
     else if (step === 'mixed') { const sv = savedSession(); if (sv && sv.kind === 'mixed') resumeSession(); else startSession('mixed'); }
+  }
+  // alternate the warm-up between angle and proportion (the app teaches doing
+  // both); prefer whichever perception skill is at the lower level
+  function startWarmup() {
+    const pl = A.store.get('percLevel', { angle: 1, prop: 1 });
+    if ((pl.angle || 1) !== (pl.prop || 1)) { A.Perceive.start((pl.angle || 1) <= (pl.prop || 1) ? 'angle' : 'prop'); return; }
+    const last = A.store.get('lastWarmKind', 'prop');
+    const kind = last === 'angle' ? 'prop' : 'angle';
+    A.store.set('lastWarmKind', kind);
+    A.Perceive.start(kind);
+  }
+
+  // RETENTION CHECK: pull a scored target studied on a previous day (newest days
+  // first, random within the day) and serve it cold — no study phase.
+  async function startRecall() {
+    const all = await attempts();
+    const today = A.habit.today();
+    const pool = all.filter((a) => a.scored && !a.repeat && !a.recall && a.day && a.day < today && a.target);
+    if (!pool.length) { toast('No previous figures to recall yet — practise today, test tomorrow.'); return; }
+    const days = Array.from(new Set(pool.map((a) => a.day))).sort().reverse().slice(0, 7);
+    const day = days[Math.floor(Math.random() * Math.min(3, days.length))];   // mostly yesterday-ish
+    const cand = pool.filter((a) => a.day === day);
+    const att = cand[Math.floor(Math.random() * cand.length)];
+    run = null; session = null;
+    const d = $('#drill'); d.classList.add('on');
+    surface.opts.pencilOnly = A.store.get('pencilOnly', false);
+    surface.opts.baseWidth = A.store.get('inkWidth', 3.2);
+    setTimeout(() => { surface.resize(); drill.startRecall(att.type, att.target); }, 0);
   }
 
   async function attempts(force) {
@@ -122,6 +162,7 @@
     return attemptsCache;
   }
   function invalidate() { attemptsCache = null; }
+  ui.invalidate = invalidate;   // other modules (perceive) record attempts too
 
   /* ---- profiles (multi-user on one iPad) --------------------------------- */
   function refreshProfileChip() {
@@ -153,7 +194,7 @@
       if (!(sw || add || go) || done) return;
       done = true; e.preventDefault();
       if (sw) { closeModal(); if (sw.dataset.switch !== cur) switchProfile(sw.dataset.switch); }
-      else if (add) { const name = prompt('Name for the new user?'); closeModal(); if (name && name.trim()) switchProfile(A.store.addProfile(name)); }
+      else if (add) { closeModal(); promptModal('Name for the new user?', '', (name) => switchProfile(A.store.addProfile(name))); }
       else if (go) { closeModal(); ui.go('settings'); }
     };
     sheet.addEventListener('pointerup', act);
@@ -169,22 +210,6 @@
   /* ======================================================================
      HOME / TODAY
      ====================================================================== */
-  // spaced review: the scored exercise with the weakest recent accuracy
-  async function weakestFocus() {
-    const all = await attempts();
-    const scored = all.filter((a) => a.scored);
-    if (scored.length < 4) return null;
-    const recent = {};
-    ['line', 'angles', 'polygon', 'envelope'].forEach((t) => {
-      const xs = scored.filter((a) => a.type === t).slice(-5).map((a) => a.score);
-      if (xs.length) recent[t] = xs.reduce((a, b) => a + b, 0) / xs.length;
-    });
-    const keys = Object.keys(recent);
-    if (!keys.length) return null;
-    keys.sort((a, b) => recent[a] - recent[b]);
-    return { key: keys[0], mean: Math.round(recent[keys[0]]) };
-  }
-
   async function renderHome(v) {
     const goal = A.habit.goalMin();
     const mins = A.habit.todayMinutes();
@@ -217,11 +242,11 @@
       <div class="badges">${badges}</div></div>`;
 
     // ---- daily challenge + weekly recap ----
-    const dc = A.game.dailyChallenge();
+    const dc = A.game.dailyChallenge(allAtts);   // targets your WEAKEST drill once known
     const dp = A.game.dailyProgress(allAtts, dc);
     const dcName = A.curr.def(dc.exKey) ? A.curr.def(dc.exKey).name : dc.exKey;
     const dailyCard = `<div class="card"><div class="row between center">
-        <div><h2>Daily challenge</h2><div class="small muted">${dp.done}/${dc.target} · ${esc(dcName)}</div></div>
+        <div><h2>Daily challenge</h2><div class="small muted">${dp.done}/${dc.target} · ${esc(dcName)}${dc.focus ? ' <span class="tag">weakest drill</span>' : ''}</div></div>
         ${dp.complete ? '<span class="lvlpill" style="background:var(--good);color:#fff">✓ done</span>'
                       : `<button class="btn soft sm" data-focus="${dc.exKey}">Start ›</button>`}</div></div>`;
     const wr = A.game.weeklyRecap(allAtts);
@@ -290,6 +315,7 @@
     v.onclick = (e) => {
       const rc = e.target.closest('[data-rec]'); if (rc) { doRec(rc.dataset.rec, rc.dataset.recex); return; }
       const bd = e.target.closest('.badge'); if (bd) { toast(bd.getAttribute('title') || ''); return; }
+      const cd = e.target.closest('.cal .d'); if (cd) { toast(cd.getAttribute('title') || ''); return; }
       const f = e.target.closest('[data-focus]'); if (f) { startExercise(f.dataset.focus); return; }
       const g = e.target.closest('[data-go]'); if (g) ui.go(g.dataset.go);
     };
@@ -406,8 +432,8 @@
         <div class="hgroup"><div class="tiny muted" id="d-sess"></div>
           <div class="ringwrap"><div class="tring" id="d-ring"><svg viewBox="0 0 48 48"><circle class="track" cx="24" cy="24" r="20"></circle><circle class="fill" id="d-ringfill" cx="24" cy="24" r="20"></circle></svg><div class="tringtxt" id="d-timer"></div></div><div class="ringlabel" id="d-ringlabel"></div></div></div></div>
       <div class="hint" id="d-hint"></div>
-      <button class="closeX" id="d-close">✕</button>
-      <button class="closeX" id="d-help" style="right:54px;font-weight:600">?</button>
+      <button class="closeX" id="d-close" aria-label="Close drill">✕</button>
+      <button class="closeX" id="d-help" style="right:58px;font-weight:600" aria-label="How this drill works">?</button>
       <canvas id="d-canvas"></canvas>
       <div id="d-result"></div>
       <div class="controls" id="d-controls"></div>
@@ -491,9 +517,11 @@
   }
   function startSession(kind) {
     const cfg = SESSIONS[kind] || SESSIONS.mixed;
+    // the full scored ladder — leaving one out (curve, historically) let the
+    // recommendation engine demand a drill sessions never actually served
     const queue = kind === 'warmup'
-      ? shuffledQueue(['line', 'angles', 'polygon'], cfg.n)
-      : shuffledQueue(['line', 'angles', 'polygon', 'envelope'], cfg.n);
+      ? shuffledQueue(['line', 'angles', 'curve', 'polygon'], cfg.n)
+      : shuffledQueue(['line', 'angles', 'curve', 'polygon', 'envelope'], cfg.n);
     session = { kind, queue, completed: 0, results: [], day: A.habit.today() };
     run = null;
     sessionStart = performance.now();
@@ -513,6 +541,23 @@
       if (d.def.scored) { session.results.push({ type: d.exKey, score: d.result.score }); session.completed++; saveSession(); }
     } else if (run && d.def.scored) {
       run.results.push({ type: d.exKey, score: d.result.score }); run.done++;
+    }
+    fatigueCheck();
+  }
+  // quality-decline watch: when the last 3 scored results in this sitting each
+  // fall clearly below the sitting's own mean, practice quality is dropping —
+  // short, high-quality sessions beat pushing through (once per sitting).
+  function fatigueCheck() {
+    const box = session || run;
+    if (!box || box._fatigueTold) return;
+    const res = box.results || [];
+    if (res.length < 5) return;
+    const scores = res.map((r) => r.score);
+    const m = scores.reduce((a, b) => a + b, 0) / scores.length;
+    const last3 = scores.slice(-3);
+    if (last3.every((s) => s < m - 10)) {
+      box._fatigueTold = true;
+      toast('Accuracy is dropping — a rest now beats grinding on. Short sessions stick better.');
     }
   }
   // true when the current drill is the last of its session / set
@@ -639,8 +684,18 @@
         const full = cap && e >= cap;
         t.textContent = Math.floor(e) + 's'; setRing(cap ? Math.min(1, e / cap) : 0, full);
         lab = 'study';
-        if (hint) hint.textContent = full ? 'That’s the suggested look — hide it and draw from memory.' : '';
+        // over-stare nudge: staring past ~2× your own average look doesn't encode
+        // more — glances beat stares (Rousar). Only once there's a stable average.
+        const stare = drill.avgLook >= 3 && e > drill.avgLook * 2;
+        if (hint) hint.textContent = stare ? 'Ease off — long stares don’t stick. Commit and draw.'
+                                   : (full ? 'That’s the suggested look — hide it and draw from memory.' : '');
       }
+    } else if (drill.phase === 'hold') {           // retention hold: counts down to draw
+      const rem = Math.max(0, drill.holdRemaining || 0);
+      t.textContent = Math.ceil(rem) + 's';
+      setRing(drill.holdCap ? rem / drill.holdCap : 0, rem <= 1);
+      lab = 'hold it';
+      if (hint) hint.textContent = '';
     } else if (drill.phase === 'draw') {           // recall: fills to the soft budget
       const e = drill.drawElapsed || 0, bud = drill.drawBudget;
       const over = !!(bud && e > bud);
@@ -683,10 +738,16 @@
         : `<button class="btn ghost" data-act="skip">Hide & draw now</button>`;
       controls.innerHTML = `${newFig}${flipBtn}${!def.scored ? measureBtns : ''}${commit}`;
     }
+    else if (drill.phase === 'hold') {
+      // retention hold: keep the image in the MIND'S EYE for a moment before
+      // drawing — this forces recall from encoded memory, not the afterimage
+      instr.textContent = 'Hold it in your mind’s eye — picture every angle and length…';
+      controls.innerHTML = '';
+    }
     else if (drill.phase === 'draw') {
       const flipBtn = !def.scored && drill.ref && drill.ref.img ? `<button class="btn ghost sm ${surface.ghostFlip ? 'sel' : ''}" data-act="flip">Flip ⟲</button>` : '';
       const glanceBtn = `<button class="btn ghost sm" data-act="glance" ${drill.glancesLeft() <= 0 ? 'disabled' : ''}>Glance${drill.glanceCap ? ' ' + drill.glancesLeft() : ''}</button>`;
-      const undoBtn = `<button class="btn ghost sm" data-act="undo" ${surface.strokes.length ? '' : 'disabled'}>Undo</button>`;
+      const undoBtn = `<button class="btn ghost sm" data-act="undo" ${surface.canUndo() ? '' : 'disabled'}>Undo</button>`;
       const eraseBtn = `<button class="btn ghost sm ${surface.erasing ? 'sel' : ''}" data-act="erase">Erase</button>`;
       const guidesBtn = `<button class="btn ghost sm ${surface.guides ? 'sel' : ''}" data-act="guides">Guides</button>`;
       if (!def.scored && drill.stages) {     // guided multi-stage block-in
@@ -696,7 +757,9 @@
           ${last ? '<button class="btn" data-act="evaluate">Reveal</button>'
                  : '<button class="btn" data-act="nextstage">Next stage ›</button>'}`;
       } else {
-        instr.textContent = 'Hidden — now draw it from memory.' + (!def.scored ? measuring : '');
+        instr.textContent = (drill.isRecall
+          ? 'Retention check — draw the figure you studied last time, cold.'
+          : 'Hidden — now draw it from memory.') + (!def.scored ? measuring : '');
         controls.innerHTML = `${glanceBtn}${def.scored || !drill.ref ? (def.scored ? guidesBtn : '') : measureBtns}${flipBtn}${undoBtn}${eraseBtn}<button class="btn ghost sm" data-act="clear">Clear</button>
           ${newFig}<button class="btn" data-act="evaluate" ${drill.canEvaluate() ? '' : 'disabled'}>${def.scored ? 'Evaluate' : 'Reveal'}</button>`;
       }
@@ -726,8 +789,14 @@
     const r = drill.result;
     instr.textContent = 'Compare: your marks vs the target (red).';
     const m = r.metrics || {};
-    if (!r._pb) r._pb = A.game.personalBest(drill.exKey, r.score);   // record once
+    // repeats saw the answer; recalls are a different game — neither sets a PB
+    if (!r._pb && !r.repeat && !r.recall) r._pb = A.game.personalBest(drill.exKey, r.score);
     const pbMsg = r._pb && r._pb.isNew ? '<div class="insight" style="background:var(--accent);color:#fff">★ New personal best!</div>' : '';
+    const modeMsg = r.recall
+      ? '<div class="insight" style="text-align:left">Retention check — recalled across a day. Scores run lower here; that struggle is the training. (Doesn’t affect your level.)</div>'
+      : (r.repeat ? '<div class="tiny muted" style="margin-bottom:6px">Correction redraw — recorded, but it doesn’t count toward your level or bests.</div>' : '');
+    const glanceMsg = (!r.repeat && !r.recall && drill.glanceCount > 0)
+      ? `<div class="tiny muted" style="margin-bottom:6px">${drill.glanceCount} glance${drill.glanceCount > 1 ? 's' : ''} used — level credit reduced by ${drill.glanceCount * 5}.</div>` : '';
     let metricRows = '';
     if (drill.exKey === 'line' || drill.exKey === 'angles') {
       const ae = m.angleErrDeg != null ? m.angleErrDeg : m.meanAngleErrDeg;
@@ -750,15 +819,24 @@
         <div class="tiny muted" style="margin:2px 0 8px">${esc(aw)} · off by ${r.estErr}%</div>`;
     }
     const coachRow = r.coaching ? `<div class="insight" style="text-align:left">${esc(r.coaching)}</div>` : '';
-    // faded feedback: detailed metric breakdown only when showDetail
-    const detail = r.showDetail ? metricRows : '<div class="tiny muted" style="margin-bottom:6px">Detailed metrics hidden — trust your eye. (Full read every few drills.)</div>';
+    // faded feedback with self-controlled access: the breakdown thins out with
+    // skill, but the learner can always ASK for it (autonomy-supportive feedback)
+    const detail = r.showDetail ? metricRows
+      : `<div id="d-detail"><button class="btn ghost sm block" data-showdetail="1" style="margin-bottom:6px">Show breakdown</button></div>`;
     result.innerHTML = `<div class="card resultcard">
       <div class="scorebadge ${scoreClass(r.score)}">${r.score}</div>
-      <div class="muted small" style="margin-bottom:8px">accuracy</div>${pbMsg}
+      <div class="muted small" style="margin-bottom:8px">${r.recall ? 'retention accuracy' : 'accuracy'}</div>${pbMsg}${modeMsg}${glanceMsg}
       ${estRow}${detail}${coachRow}${lvlMsg}</div>`;
-    controls.innerHTML = `<button class="btn ghost sm" data-act="redraw">Redraw</button>
-      <button class="btn ghost sm" data-act="again">Re-study</button>
-      <button class="btn" data-act="next">${atSetEnd() ? 'See results ›' : 'Next ›'}</button>`;
+    if (!r.showDetail) {
+      const slot = $('#d-detail', result);
+      if (slot) slot.querySelector('[data-showdetail]').onpointerup = (e) => { e.preventDefault(); slot.innerHTML = metricRows; };
+    }
+    controls.innerHTML = drill.isRecall
+      ? `<button class="btn ghost sm" data-act="again">Study it again</button>
+         <button class="btn" data-act="close">Done ›</button>`
+      : `<button class="btn ghost sm" data-act="redraw">Redraw</button>
+         <button class="btn ghost sm" data-act="again">Re-study</button>
+         <button class="btn" data-act="next">${atSetEnd() ? 'See results ›' : 'Next ›'}</button>`;
   }
 
   function revealReference(instr, controls, result) {
@@ -882,6 +960,7 @@
       else if (a === 'again') drill.studyAgain();
       else if (a === 'skipdrill') sessionSkip();
       else if (a === 'next') sessionAdvance();
+      else if (a === 'close') closeDrill();
     };
     // Use pointerup (not click): iOS suppresses the first synthetic click right after
     // a Pencil drawing gesture on a touch-action:none canvas, which caused the
@@ -956,9 +1035,12 @@
         ${A.charts.biasBar(m, 20, ['under-rotate', 'over-rotate'])}</div>`;
     }
     const sa = A.stats.selfAwareness(all);
+    const calLine = sa && sa.bias != null ? A.coach.calibration(sa.bias) : '';
     const saCard = sa ? `<div class="card"><h2>Self-awareness <span class="muted small">(${sa.n})</span></h2>
-      <div class="small muted">how well your pre-reveal guess matched the real score — higher = you see your own errors. Avg gap ${sa.meanGap} pts.</div>
-      ${A.charts.line(sa.trend)}</div>` : '';
+      <div class="small muted">how well your pre-reveal guess matched the real score — higher = you see your own errors. Avg gap ${sa.meanGap} pts (recent).</div>
+      ${A.charts.line(sa.trend)}
+      ${sa.bias != null ? `<div class="small muted" style="margin-top:6px">Direction: <b>${sa.bias > 0 ? '+' : ''}${sa.bias} pts</b></div>${A.charts.biasBar(sa.bias, 20, ['underconfident', 'overconfident'])}` : ''}
+      ${calLine ? `<div class="insight">${esc(calLine)}</div>` : ''}</div>` : '';
 
     v.innerHTML = `
       <div class="card"><h2>Overview</h2>
@@ -994,8 +1076,8 @@
     const cells = all.slice(0, 200).map((a) => {
       const dt = new Date(a.ts);
       return `<div class="cell" data-att="${a.id}">${A.history.thumbSVG(a, 130)}
-        <div class="cap"><span>${esc(exName(a.type).split(' ')[0])}</span>
-        <span class="sc ${scoreClass(a.score)}" style="color:${a.score >= 85 ? 'var(--good)' : a.score >= 65 ? 'var(--warn)' : 'var(--bad)'}">${a.score}${a.selfRated ? '*' : ''}</span></div></div>`;
+        <div class="cap"><span>${esc(exName(a.type).split(' ')[0])}${a.recall ? ' ⟲' : ''}</span>
+        <span class="sc ${scoreClass(a.score)}">${a.score}${a.selfRated ? '*' : ''}</span></div></div>`;
     }).join('');
     v.innerHTML = `<div class="card"><div class="row between center"><h2>History</h2><span class="muted small">${all.length} drills · * = self-rated</span></div></div>
       <div class="gal">${cells}</div>`;
@@ -1019,14 +1101,18 @@
     }
     const sheet = openModal(`<div class="row between center"><h2>${esc(exName(a.type))}</h2>
       <span class="scorebadge ${scoreClass(a.score)}" style="font-size:30px">${a.score}${a.selfRated ? '*' : ''}</span></div>
-      <div class="small muted">${dt.toLocaleString()} · Lv ${a.level} · ${a.studySec}s study · ${a.drawSec}s draw</div>
+      <div class="small muted">${dt.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })} · ${dt.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })} · Lv ${a.level}${a.recall ? ' · retention check' : ''}${a.repeat ? ' · redraw' : ''} · ${a.studySec}s study · ${a.drawSec}s draw</div>
       <canvas class="replaycv" id="rep"></canvas>
       <div class="row" style="margin:8px 0"><button class="btn soft sm" id="rep-play">▶ Replay</button>
         ${a.refTitle ? `<span class="small muted center" style="display:flex;align-items:center">ref: ${esc(a.refTitle)}</span>` : ''}</div>
       ${detail}
       <button class="btn ghost block" id="att-del" style="margin-top:12px">Delete this drill</button>`);
     const cv = $('#rep', sheet); const ctx = cv.getContext('2d');
-    const size = 360; cv.width = size; cv.height = size;
+    // render at the DISPLAYED size × devicePixelRatio, or the replay is blurry
+    // on every retina iPad (the buffer used to be a fixed 360)
+    const cssW = cv.clientWidth || 360, dpr = window.devicePixelRatio || 1;
+    const size = Math.round(cssW * dpr);
+    cv.width = size; cv.height = size;
     A.history.drawReplay(ctx, a, size, 1);
     let raf = null;
     $('#rep-play', sheet).onclick = () => {
@@ -1034,7 +1120,10 @@
       const step = (t) => { const p = Math.min(1, (t - t0) / dur); A.history.drawReplay(ctx, a, size, p); if (p < 1) raf = requestAnimationFrame(step); };
       raf = requestAnimationFrame(step);
     };
-    $('#att-del', sheet).onclick = async () => { await A.store.deleteAttempt(a.id); invalidate(); closeModal(); ui.go('history'); toast('Drill deleted'); };
+    $('#att-del', sheet).onclick = () => {
+      confirmModal('Delete this drill?', 'The recorded attempt and its replay are removed.', 'Delete',
+        async () => { await A.store.deleteAttempt(a.id); invalidate(); closeModal(); ui.go('history'); toast('Drill deleted'); }, true);
+    };
   }
 
   /* ======================================================================
@@ -1061,9 +1150,10 @@
       for (const f of files) { try { await A.library.importFile(f); } catch (err) { toast('Could not import ' + f.name); } }
       toast(files.length + ' image(s) imported'); renderLibrary(v);
     };
-    v.querySelectorAll('[data-del]').forEach((b) => b.onclick = async (e) => {
+    v.querySelectorAll('[data-del]').forEach((b) => b.onclick = (e) => {
       e.stopPropagation();
-      if (confirm('Delete this reference?')) { await A.library.deleteUser(b.dataset.del); renderLibrary(v); }
+      confirmModal('Delete this reference?', 'The imported image is removed from your library.', 'Delete',
+        async () => { await A.library.deleteUser(b.dataset.del); renderLibrary(v); }, true);
     });
   }
 
@@ -1083,7 +1173,7 @@
     let fill = 'M' + X(0).toFixed(1) + ',' + Y(0).toFixed(1) + ' ';
     for (let i = 1; i <= cur; i++) fill += 'L' + X(i).toFixed(1) + ',' + Y(i).toFixed(1) + ' ';
     fill += 'L' + mX.toFixed(1) + ',' + mY.toFixed(1) + ' ';
-    const nodes = names.map((nm, i) => `<circle cx="${X(i).toFixed(1)}" cy="${Y(i).toFixed(1)}" r="${i === cur ? 6 : 4.5}" fill="${i <= cur ? 'var(--accent)' : 'var(--hair)'}" stroke="#fff" stroke-width="2"/><text x="${X(i).toFixed(1)}" y="${H - 6}" class="jlabel ${i === cur ? 'cur' : ''}" text-anchor="middle">${esc(nm)}</text>`).join('');
+    const nodes = names.map((nm, i) => `<circle cx="${X(i).toFixed(1)}" cy="${Y(i).toFixed(1)}" r="${i === cur ? 6 : 4.5}" fill="${i <= cur ? 'var(--accent)' : 'var(--hair)'}" stroke="var(--card)" stroke-width="2"/><text x="${X(i).toFixed(1)}" y="${H - 6}" class="jlabel ${i === cur ? 'cur' : ''}" text-anchor="middle">${esc(nm)}</text>`).join('');
     return `<svg viewBox="0 0 ${W} ${H}" class="chart">
       <path d="${base}" fill="none" stroke="var(--hair)" stroke-width="3" stroke-linecap="round"/>
       <path d="${fill}" fill="none" stroke="var(--accent)" stroke-width="3" stroke-linecap="round"/>
@@ -1153,7 +1243,7 @@
         <div class="setrow"><div><div>Daily goal</div><div class="small muted">minutes per day for your streak</div></div>
           <div class="stepper"><button data-goal="-1">−</button><b id="goalv">${goal}</b><button data-goal="1">+</button></div></div>
         <div class="setrow"><div><div>Apple Pencil only</div><div class="small muted">ignore finger/palm while drawing</div></div>
-          <div class="switch ${pencilOnly ? 'on' : ''}" id="sw-pencil"><div class="knob"></div></div></div>
+          <div class="switch ${pencilOnly ? 'on' : ''}" id="sw-pencil" role="switch" aria-checked="${pencilOnly}" tabindex="0" aria-label="Apple Pencil only"><div class="knob"></div></div></div>
         <div class="setrow"><div><div>Ink weight</div><div class="small muted">stroke thickness</div></div>
           <div class="stepper"><button data-ink="-0.4">−</button><b id="inkv">${inkW.toFixed(1)}</b><button data-ink="0.4">+</button></div></div>
         <div class="setrow"><div><div>Sighting guides</div><div class="small muted">plumb line, horizon, thirds, angle ticks</div></div>
@@ -1179,12 +1269,13 @@
     $$('[data-psw]', v).forEach((b) => b.onclick = () => switchProfile(b.dataset.psw));
     $$('[data-pren]', v).forEach((b) => b.onclick = () => {
       const p = A.store.profiles().find((x) => x.id === b.dataset.pren);
-      const n = prompt('Rename user', p ? p.name : ''); if (n && n.trim()) { A.store.renameProfile(b.dataset.pren, n); refreshProfileChip(); renderSettings(v); }
+      promptModal('Rename user', p ? p.name : '', (n) => { A.store.renameProfile(b.dataset.pren, n); refreshProfileChip(); renderSettings(v); });
     });
-    $$('[data-pdel]', v).forEach((b) => b.onclick = async () => {
-      if (confirm('Delete this user and all their progress on this iPad? This cannot be undone.')) { await A.store.deleteProfile(b.dataset.pdel); renderSettings(v); }
+    $$('[data-pdel]', v).forEach((b) => b.onclick = () => {
+      confirmModal('Delete this user?', 'All their progress on this iPad will be removed. This cannot be undone.', 'Delete',
+        async () => { await A.store.deleteProfile(b.dataset.pdel); renderSettings(v); }, true);
     });
-    $('#addprofile', v).onclick = () => { const n = prompt('Name for the new user?'); if (n && n.trim()) switchProfile(A.store.addProfile(n)); };
+    $('#addprofile', v).onclick = () => promptModal('Name for the new user?', '', (n) => switchProfile(A.store.addProfile(n)));
     $$('[data-goal]', v).forEach((b) => b.onclick = () => { A.habit.setGoal(Math.max(5, Math.min(120, goal + (+b.dataset.goal) * 5))); renderSettings(v); });
     $$('[data-ink]', v).forEach((b) => b.onclick = () => { A.store.set('inkWidth', Math.max(1.2, Math.min(6, inkW + (+b.dataset.ink)))); surface.opts.baseWidth = A.store.get('inkWidth', 3.2); renderSettings(v); });
     $('#sw-pencil', v).onclick = () => { A.store.set('pencilOnly', !pencilOnly); surface.opts.pencilOnly = !pencilOnly; renderSettings(v); };
@@ -1200,12 +1291,19 @@
       if (list.length >= 30 && !last) el.style.color = 'var(--warn)';
     });
     $('#reset-prog', v).onclick = () => {
-      if (!confirm('Reset all levels, rank, achievements, personal bests and streak? (Your saved drills stay.)')) return;
-      ['curriculum', 'percLevel', 'percWin', 'ach', 'pb', 'bestStreak', 'lastRank', 'daily', 'dailyDone', 'dailyCount'].forEach((k) => localStorage.removeItem('atelier:' + k));
-      A.store.set('habit', { days: {}, goalMin: goal });
-      toast('Progress reset'); renderSettings(v);
+      confirmModal('Reset progress?', 'All levels, rank, achievements, personal bests and streak reset. Your saved drills stay.', 'Reset', () => {
+        // store.remove is profile-aware — a hand-built 'atelier:' prefix would
+        // wipe the DEFAULT profile's keys no matter who is active
+        ['curriculum', 'percLevel', 'percWin', 'ach', 'pb', 'bestStreak', 'lastRank', 'daily', 'dailyDone', 'dailyCount', 'session']
+          .forEach((k) => A.store.remove(k));
+        A.store.set('habit', { days: {}, goalMin: goal });
+        toast('Progress reset'); renderSettings(v);
+      }, true);
     };
-    $('#wipe', v).onclick = async () => { if (confirm('Delete ALL saved drills? This cannot be undone.')) { await A.store.clearAttempts(); invalidate(); toast('All drills deleted'); } };
+    $('#wipe', v).onclick = () => {
+      confirmModal('Delete ALL saved drills?', 'Every recorded drill for this user is removed. This cannot be undone.', 'Delete all',
+        async () => { await A.store.clearAttempts(); invalidate(); toast('All drills deleted'); }, true);
+    };
   }
 
   async function exportBackup() {
@@ -1223,21 +1321,53 @@
     const f = e.target.files[0]; if (!f) return;
     try {
       const txt = await f.text(); const data = JSON.parse(txt);
-      await A.store.importAll(data, { merge: false });
+      const res = await A.store.importAll(data, { merge: false });
       await A.library.init(); invalidate();
-      toast('Backup restored'); ui.go('home');
+      toast('Backup restored — ' + (res && res.records != null ? res.records + ' records' : 'done')); ui.go('home');
     } catch (err) { toast('Restore failed: ' + err.message); }
   }
 
   /* ---- modal ------------------------------------------------------------- */
-  function openModal(html) {
+  function openModal(html, opts) {
     closeModal();
-    const m = el(`<div class="modal"><div class="sheet">${html}</div></div>`);
+    const m = el(`<div class="modal${opts && opts.top ? ' top' : ''}"><div class="sheet">${html}</div></div>`);
     m.addEventListener('click', (e) => { if (e.target === m) closeModal(); });
     document.body.appendChild(m);
     return $('.sheet', m);
   }
   function closeModal() { const m = $('.modal'); if (m) m.remove(); }
+
+  // in-app replacements for prompt()/confirm(): native dialogs render as origin-
+  // titled system alerts inside an installed PWA (and iOS has suppressed prompt()
+  // in standalone mode before) — the most "this is a webpage" moment in the app.
+  // Top-aligned so the iPad keyboard can't cover the input.
+  function promptModal(title, initial, onOk, sub) {
+    const sheet = openModal(`<h2>${esc(title)}</h2>
+      ${sub ? `<p class="small muted">${esc(sub)}</p>` : ''}
+      <input type="text" class="txtinput" id="pm-input" value="${esc(initial || '')}" autocomplete="off">
+      <div class="row" style="margin-top:12px">
+        <button class="btn ghost block" data-cancel="1">Cancel</button>
+        <button class="btn block" data-ok="1">OK</button></div>`, { top: true });
+    const input = $('#pm-input', sheet);
+    setTimeout(() => { try { input.focus(); input.select(); } catch (_) {} }, 60);
+    const ok = () => { const v = input.value; closeModal(); if (v && v.trim()) onOk(v.trim()); };
+    sheet.addEventListener('click', (e) => {
+      if (e.target.closest('[data-ok]')) ok();
+      else if (e.target.closest('[data-cancel]')) closeModal();
+    });
+    input.addEventListener('keydown', (e) => { if (e.key === 'Enter') ok(); });
+  }
+  function confirmModal(title, body, okLabel, onOk, danger) {
+    const sheet = openModal(`<h2>${esc(title)}</h2>
+      <p class="small muted" style="margin:8px 0 0">${esc(body)}</p>
+      <div class="row" style="margin-top:14px">
+        <button class="btn ghost block" data-cancel="1">Cancel</button>
+        <button class="btn block" data-ok="1" ${danger ? 'style="background:var(--bad)"' : ''}>${esc(okLabel || 'OK')}</button></div>`);
+    sheet.addEventListener('click', (e) => {
+      if (e.target.closest('[data-ok]')) { closeModal(); onOk(); }
+      else if (e.target.closest('[data-cancel]')) closeModal();
+    });
+  }
 
   A.ui = ui;
 })(window.A = window.A || {});

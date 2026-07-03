@@ -43,6 +43,8 @@
     this.pending = null;        // computed result awaiting the self-estimate
     this.result = null;
     this.ghostOpacity = 0.45;
+    this.isRepeat = false;      // redraw/re-study of a SEEN answer — not a memory trial
+    this.isRecall = false;      // retention check on a previously-studied target
     this._timer = null;
     this.onState = null; this.onTick = null; this.onResult = null;
     surface.onStrokeEnd = () => { if (this.onState) this.onState(this); };
@@ -55,6 +57,7 @@
     this.def = A.curr.def(exKey);
     this.level = A.curr.level(exKey);
     this.result = null; this.pending = null; this.sessionIndex = 0;
+    this.isRepeat = false; this.isRecall = false;
     this.glanceCount = 0; this.glanceCap = 3;
     this.avgLook = 0;       // recent average look time (for the over-stare nudge)
     A.store.attemptsByType(exKey).then((list) => {
@@ -107,6 +110,8 @@
     this.studyElapsed = 0;
     this.glanceCount = 0;
     this.surface.clearMarks();
+    this.surface.clearUndo();           // phase boundary — undo must not resurrect old marks
+    this.surface.locked = true;         // STUDY is for the eyes; tracing would defeat it
     this.surface.guides = this._computeGuides();
     this.surface.ghostStudy = true;
     this.surface.setPhase('study');     // show generated target
@@ -131,17 +136,50 @@
 
   Drill.prototype.skipStudy = function () { if (this.phase === 'study') this._toDraw(); };
 
+  // Retention hold between hide and draw (scored drills, level ≥ 4): a short
+  // "picture it" pause defeats the iconic/afterimage trace, so the drawing has
+  // to come from ENCODED visual memory — the thing being trained. Classical
+  // practice (Lecoq) pushed this delay out to a full day; here it scales with
+  // level. Skipped for beginners so early success stays encouraging.
+  Drill.prototype._holdSeconds = function () {
+    if (!this.def.scored || this.level < 4) return 0;
+    return Math.min(12, 3 + (this.level - 4) * 2);       // L4: 3s → L9: 12s (capped)
+  };
+
+  Drill.prototype._enterHold = function () {
+    clearInterval(this._timer);
+    this.phase = 'hold';
+    this.holdCap = this._holdSeconds();
+    this.holdRemaining = this.holdCap;
+    this.surface.locked = true;
+    this.surface.ghostStudy = false;
+    this.surface.setGhost(null);
+    this.surface.setPhase('draw');      // blank paper — hold the image in the mind's eye
+    this._emit();
+    const start = performance.now();
+    this._timer = setInterval(() => {
+      this.holdRemaining = this.holdCap - (performance.now() - start) / 1000;
+      if (this.holdRemaining <= 0) { this.holdRemaining = 0; this._toDraw(); }
+      else if (this.onTick) this.onTick(this);
+    }, 100);
+  };
+
   Drill.prototype._toDraw = function () {
     clearInterval(this._timer);
-    // record the ACTUAL look time (self-chosen for beginners) — shrinking it is progress
-    this.studySec = +Math.max(0.1, (performance.now() - this._studyStart) / 1000).toFixed(1);
+    if (this.phase === 'study') {
+      // record the ACTUAL look time (self-chosen for beginners) — shrinking it is progress
+      this.studySec = +Math.max(0.1, (performance.now() - this._studyStart) / 1000).toFixed(1);
+      if (this._holdSeconds() > 0) { this._enterHold(); return; }
+    }
     this.phase = 'draw';
+    this.surface.locked = false;
     this.surface.measureMode = false;   // back to drawing (calipers already laid stay visible)
     this.surface.ghostStudy = false;
     this.surface.setGhost(null);        // hide reference
     this.surface.guides = this._computeGuides();
     this.surface.setPhase('draw');      // hide generated target
     this.surface.clearMarks();
+    this.surface.clearUndo();           // undo must not reach back past the phase change
     this.stages = (!this.def.scored && STAGES[this.exKey]) ? STAGES[this.exKey] : null;
     this.stage = 0;
     // recall budget: soft target for committing the marks before the memory trace
@@ -238,6 +276,7 @@
       this.pending = r;
       this.sessionIndex++;
       this.phase = 'estimate';
+      this.surface.locked = true;              // the scored snapshot is final — no edits now
       this.surface.setPhase('draw');           // keep marks, no target yet
       this._emit();
     } else {
@@ -255,15 +294,27 @@
     const r = this.pending; this.pending = null;
     const estErr = Math.abs(est - r.score);
     const coaching = A.coach.advice(this.exKey, r.metrics);
-    // faded feedback (guidance hypothesis): full metric breakdown only early on
-    // or intermittently; otherwise just the score + one cue.
-    const showDetail = (this.level <= 2) || (this.sessionIndex % 3 === 1);
-    const adv = A.curr.recordScore(this.exKey, r.score, dayKey());
-    this.level = adv.level;
+    // faded feedback (guidance hypothesis): the metric breakdown thins out as
+    // skill grows — every trial at first, then progressively rarer. The learner
+    // can always tap "Show breakdown" (self-controlled feedback, OPTIMAL).
+    const period = Math.min(6, 1 + Math.ceil(this.level / 2));   // L1-2: every, L3-4: /3 … L9: /6
+    const showDetail = (this.level <= 2) || (this.sessionIndex % period === 1);
+    // repeats (answer already seen) and retention recalls don't feed the
+    // promotion window — only genuine, first-look memory trials certify a level.
+    // Manual glances cost level credit: the score stands, but each peek shaves
+    // the value the promotion window sees (memory training isn't defeated quietly).
+    let adv = { changed: false, level: this.level };
+    if (!this.isRepeat && !this.isRecall) {
+      const credit = Math.max(0, r.score - 5 * (this.glanceCount || 0));
+      adv = A.curr.recordScore(this.exKey, credit, dayKey());
+      this.level = adv.level;
+    }
     this.result = { score: r.score, selfRated: false, metrics: r.metrics,
-                    selfEstimate: est, estErr, coaching, showDetail, levelChange: adv };
+                    selfEstimate: est, estErr, coaching, showDetail, levelChange: adv,
+                    repeat: this.isRepeat, recall: this.isRecall };
     this._record(r.score, false, r.metrics, est);
     this.phase = 'reveal';
+    this.surface.locked = false;
     this.surface.setPhase('reveal');
     if (this.onResult) this.onResult(this);   // bump set/session counters BEFORE rendering
     this._emit();
@@ -292,14 +343,20 @@
   };
 
   Drill.prototype._record = function (score, selfRated, metrics, selfEstimate) {
+    // decimate strokes before storing: coalesced Pencil input is ~10× denser
+    // than the drawn path needs — RDP keeps replay/thumbnails visually identical
+    // while attempts, exports and the History screen stay light
+    const strokes = this.surface.strokesDesign().map((s) => A.geom.rdp(s, 0.0015));
     const att = {
       ts: Date.now(), day: dayKey(), type: this.exKey, scored: !!this.def.scored,
       level: this.level, studySec: +this.studySec.toFixed(1), drawSec: +this.drawSec.toFixed(1),
       score: score, selfRated: !!selfRated, metrics: metrics || {},
       glances: this.glanceCount || 0,
+      repeat: !!this.isRepeat, recall: !!this.isRecall,
       selfEstimate: (selfEstimate == null ? null : selfEstimate),
       estErr: (selfEstimate == null ? null : Math.abs(selfEstimate - score)),
-      target: this.target, strokes: this.surface.strokesDesign(),
+      estBias: (selfEstimate == null ? null : selfEstimate - score),   // signed: + = overconfident
+      target: this.target, strokes: strokes,
       refId: this.ref ? this.ref.id : null, refTitle: this.ref ? this.ref.title : null
     };
     A.store.addAttempt(att);
@@ -307,11 +364,16 @@
     this.lastAttempt = att;
   };
 
-  // redraw the SAME target from memory (Lecoq's correct-and-repeat step)
+  // redraw the SAME target from memory (Lecoq's correct-and-repeat step).
+  // Marked as a repeat: the answer has been SEEN, so the attempt is recorded
+  // but doesn't feed level promotion, personal bests or bias statistics.
   Drill.prototype.correctAndRedraw = function () {
     this.result = null;
+    this.isRepeat = true;
     this.surface.clearMarks();
+    this.surface.clearUndo();
     this.phase = 'draw';
+    this.surface.locked = false;
     this.surface.ghostStudy = false; this.surface.setGhost(null); this.surface.setPhase('draw');
     this.drawElapsed = 0;
     this.drawStart = performance.now();
@@ -319,9 +381,10 @@
     this._emit();
   };
 
-  // re-study the same target (another glance) then draw again
+  // re-study the same target (another glance) then draw again — also a repeat
   Drill.prototype.studyAgain = function () {
     this.result = null;
+    this.isRepeat = true;
     if (!this.def.scored && this.ref) this.surface.setGhost(this.ref.img, 1);
     this._enterStudy();
   };
@@ -329,15 +392,48 @@
   // brand-new target, same exercise
   Drill.prototype.next = function () {
     this.result = null;
+    this.isRepeat = false; this.isRecall = false;
     this.level = A.curr.level(this.exKey);
     this.surface.reset();
     this._newTargetGeom();
     this._enterStudy();
   };
 
+  // RETENTION CHECK — draw a target studied on a PREVIOUS day, cold, with no
+  // study phase. This is Lecoq's real test (memory across a night's sleep) and
+  // the strongest form of retrieval practice the app can offer. Recorded with
+  // recall:true; excluded from level promotion (scores are expected to be lower
+  // and shouldn't demote a level earned on same-day trials).
+  Drill.prototype.startRecall = function (exKey, target) {
+    this.exKey = exKey;
+    this.def = A.curr.def(exKey);
+    this.level = A.curr.level(exKey);
+    this.result = null; this.pending = null; this.sessionIndex = 0;
+    this.isRepeat = false; this.isRecall = true;
+    this.glanceCount = 0; this.glanceCap = 0;      // no peeking — it's a test
+    this.avgLook = 0;
+    this.ref = null;
+    this.surface.reset();
+    this.target = target;
+    this.surface.setTarget(target);
+    this.surface.setGhost(null);
+    this.studySec = 0;
+    this.phase = 'draw';
+    this.surface.locked = false;
+    this.surface.guides = false;
+    this.surface.setPhase('draw');
+    this.stages = null; this.stage = 0;
+    this.drawBudget = null;                        // unhurried — recall is hard enough
+    this.drawElapsed = 0;
+    this.drawStart = performance.now();
+    this._startDrawTimer();
+    this._emit();
+  };
+
   Drill.prototype.stop = function () {
     clearInterval(this._timer);
     this.phase = 'idle';
+    this.surface.locked = false;
     this.surface.reset();
     this._emit();
   };

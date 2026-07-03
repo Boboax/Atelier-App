@@ -6,7 +6,7 @@
   // Both are stamped at build time from build/version.json (A.VERSION) and the build
   // clock (A.BUILD, YYMMDD.HHMM). These literals are only the un-built dev fallback.
   A.VERSION = '1.3.9';
-  A.BUILD = '260625.1703';
+  A.BUILD = '260703.1733';
   function boot() {
     try { A.ui.init(); }
     catch (e) {

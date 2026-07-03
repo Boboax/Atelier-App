@@ -57,12 +57,63 @@
     while (d <= -180) d += 360;
     return d;
   }
+  geom.angDiff = angDiff;
+
+  // Diagonal of a point set's bounding box — used to reject degenerate input
+  // (an accidental tap or a hairline scribble must score 0, not ride the
+  // normalisation fallback up to a half-decent score).
+  const MIN_EXTENT = 0.02;                 // in design units ([0,1] box)
+  function extentOf(pts) {
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    for (const p of pts) {
+      if (p[0] < minX) minX = p[0]; if (p[0] > maxX) maxX = p[0];
+      if (p[1] < minY) minY = p[1]; if (p[1] > maxY) maxY = p[1];
+    }
+    return Math.hypot(maxX - minX, maxY - minY);
+  }
+  geom.extentOf = extentOf;
+
+  // Ramer–Douglas–Peucker polyline simplification (keeps [x,y,...] tuples).
+  // Used to decimate coalesced Pencil strokes before storing/replaying them —
+  // visually identical, an order of magnitude fewer points.
+  geom.rdp = function (pts, eps) {
+    if (!pts || pts.length < 3) return pts ? pts.slice() : [];
+    eps = eps == null ? 0.002 : eps;
+    const keep = new Uint8Array(pts.length);
+    keep[0] = keep[pts.length - 1] = 1;
+    const stack = [[0, pts.length - 1]];
+    while (stack.length) {
+      const seg = stack.pop(), i0 = seg[0], i1 = seg[1];
+      const a = pts[i0], b = pts[i1];
+      const dx = b[0] - a[0], dy = b[1] - a[1];
+      const L2 = dx * dx + dy * dy;
+      let worst = -1, wd = 0;
+      for (let i = i0 + 1; i < i1; i++) {
+        const p = pts[i];
+        let d;
+        if (L2 === 0) d = Math.hypot(p[0] - a[0], p[1] - a[1]);
+        else {
+          const t = Math.max(0, Math.min(1, ((p[0] - a[0]) * dx + (p[1] - a[1]) * dy) / L2));
+          d = Math.hypot(p[0] - (a[0] + t * dx), p[1] - (a[1] + t * dy));
+        }
+        if (d > wd) { wd = d; worst = i; }
+      }
+      if (wd > eps && worst > 0) { keep[worst] = 1; stack.push([i0, worst], [worst, i1]); }
+    }
+    const out = [];
+    for (let i = 0; i < pts.length; i++) if (keep[i]) out.push(pts[i]);
+    return out;
+  };
 
   /* ---- LINE scoring -------------------------------------------------------
      target / user are 2-point segments [[x1,y1],[x2,y2]] (user = stroke ends).
      Orientation is undirected (a line and its 180° flip are the same line),
      so we fold the signed angle error into (-90,90].                         */
   geom.scoreLine = function (target, userPts) {
+    if (!userPts || userPts.length < 2 || extentOf(userPts) < MIN_EXTENT) {
+      return { score: 0, angleErr: 0, lengthErrPct: -100, angleScore: 0, lengthScore: 0,
+               metrics: { degenerate: true } };
+    }
     const u0 = userPts[0], u1 = userPts[userPts.length - 1];
     const tAng = toDeg(Math.atan2(target[1][1] - target[0][1], target[1][0] - target[0][0]));
     const uAng = toDeg(Math.atan2(u1[1] - u0[1], u1[0] - u0[0]));
@@ -87,31 +138,103 @@
   };
 
   /* ---- ANGLE-RELATIONSHIP scoring ----------------------------------------
-     target/user are arrays of 2-point segments. Score = mean of per-line line
-     scores (matched by index) plus a bonus for getting the *relative* angle
-     between the first two lines right.                                       */
+     target/user are arrays of 2-point segments radiating from a shared vertex
+     (the generator always puts the vertex at index 0 of each target line).
+     What the drill trains is the RELATIONSHIP between the lines, so the score
+     blends three components:
+       - relative angles: the angular GAPS between neighbouring lines (50%)
+       - absolute orientation: how the whole bundle sits in space (30%)
+       - relative lengths: each line's length as a ratio of the longest (20%)
+     User lines are oriented outward from their common vertex (the endpoint
+     cluster), then matched one-to-one to target lines by best assignment
+     (n ≤ 3, brute-force permutations). Extra strokes beyond n are ignored;
+     too FEW lines are penalised.                                            */
   geom.scoreAngles = function (targetLines, userLines) {
     if (!targetLines.length || !userLines.length) return { score: 0, angleErr: 0, lengthErrPct: 0, metrics: {} };
-    const angOf = (l) => Math.atan2(l[1][1] - l[0][1], l[1][0] - l[0][0]) * 180 / Math.PI;
-    let sAngle = 0, sLen = 0, sScore = 0;
-    for (const t of targetLines) {
-      // match each target line to the user line of nearest (undirected) angle,
-      // so extra/construction strokes are ignored rather than penalised
-      let best = userLines[0], bd = Infinity;
-      for (const u of userLines) { let d = Math.abs(angOf(t) - angOf(u)) % 180; if (d > 90) d = 180 - d; if (d < bd) { bd = d; best = u; } }
-      const r = geom.scoreLine(t, best);
-      sAngle += r.angleErr; sLen += r.lengthErrPct; sScore += r.score;
+    userLines = userLines.filter((l) => geom.dist(l[0], l[1]) >= MIN_EXTENT);
+    if (!userLines.length) return { score: 0, angleErr: 0, lengthErrPct: 0, metrics: { degenerate: true } };
+
+    // orient user segments outward from their shared vertex: pick, per segment,
+    // the endpoint closest to the tightest endpoint cluster as its root
+    const ends = [];
+    userLines.forEach((l) => { ends.push(l[0], l[1]); });
+    let vx = 0, vy = 0;
+    if (userLines.length === 1) { vx = userLines[0][0][0]; vy = userLines[0][0][1]; }
+    else {
+      // vertex ≈ point minimizing summed distance to each segment's nearer endpoint;
+      // the endpoint-cloud medoid is a robust, cheap stand-in
+      let best = Infinity;
+      for (const c of ends) {
+        let s = 0;
+        for (const l of userLines) s += Math.min(geom.dist(c, l[0]), geom.dist(c, l[1]));
+        if (s < best) { best = s; vx = c[0]; vy = c[1]; }
+      }
     }
-    const n = targetLines.length;
-    const missing = Math.max(0, targetLines.length - userLines.length);   // penalise only too FEW lines
-    const score = Math.max(0, Math.round(sScore / n - missing * 15));
+    const orient = (l) => (geom.dist(l[0], [vx, vy]) <= geom.dist(l[1], [vx, vy])) ? l : [l[1], l[0]];
+    const dirAng = (l) => toDeg(Math.atan2(l[1][1] - l[0][1], l[1][0] - l[0][0]));
+    const segLen = (l) => geom.dist(l[0], l[1]);
+
+    const T = targetLines.map((l) => ({ ang: dirAng(l), len: segLen(l) }));
+    const U = userLines.map((l) => { const o = orient(l); return { ang: dirAng(o), len: segLen(o) }; });
+
+    // one-to-one assignment (target i → distinct user j) minimizing total |Δangle|
+    const n = T.length, m = U.length;
+    const idx = Array.from({ length: m }, (_, j) => j);
+    let bestPerm = null, bestCost = Infinity;
+    const perms = (arr, k) => {
+      if (!k) return [[]];
+      const out = [];
+      arr.forEach((v, i) => {
+        perms(arr.slice(0, i).concat(arr.slice(i + 1)), k - 1).forEach((rest) => out.push([v].concat(rest)));
+      });
+      return out;
+    };
+    const k = Math.min(n, m);
+    for (const p of perms(idx, k)) {
+      let c = 0;
+      for (let i = 0; i < k; i++) c += Math.abs(angDiff(U[p[i]].ang, T[i].ang));
+      if (c < bestCost) { bestCost = c; bestPerm = p; }
+    }
+    const matched = [];
+    for (let i = 0; i < k; i++) matched.push({ t: T[i], u: U[bestPerm[i]] });
+
+    // absolute orientation error per matched line (signed, full circle)
+    const absErrs = matched.map((p) => angDiff(p.u.ang, p.t.ang));
+    const meanAbs = absErrs.reduce((a, b) => a + b, 0) / absErrs.length;
+
+    // relative angles: gaps between neighbouring matched lines (needs ≥2)
+    let relErrs = [];
+    if (matched.length >= 2) {
+      const byT = matched.slice().sort((a, b) => a.t.ang - b.t.ang);
+      for (let i = 1; i < byT.length; i++) {
+        const gT = angDiff(byT[i].t.ang, byT[i - 1].t.ang);
+        const gU = angDiff(byT[i].u.ang, byT[i - 1].u.ang);
+        relErrs.push(angDiff(gU, gT));
+      }
+    }
+    const meanRel = relErrs.length ? relErrs.reduce((a, b) => a + b, 0) / relErrs.length : meanAbs;
+
+    // relative lengths: each line vs the bundle's longest, target vs user
+    const maxT = Math.max.apply(null, matched.map((p) => p.t.len)) || 1;
+    const maxU = Math.max.apply(null, matched.map((p) => p.u.len)) || 1;
+    const lenErrs = matched.map((p) => ((p.u.len / maxU) - (p.t.len / maxT)) / (p.t.len / maxT) * 100);
+    const meanLen = lenErrs.reduce((a, b) => a + b, 0) / lenErrs.length;
+
+    const relAbs = relErrs.length ? relErrs.map(Math.abs).reduce((a, b) => a + b, 0) / relErrs.length
+                                  : Math.abs(meanAbs);   // single line: no gaps, fall back to orientation
+    const relScore = Math.max(0, 100 - relAbs * 3);
+    const absScore = Math.max(0, 100 - absErrs.map(Math.abs).reduce((a, b) => a + b, 0) / absErrs.length * 2.2);
+    const lenScore = Math.max(0, 100 - lenErrs.map(Math.abs).reduce((a, b) => a + b, 0) / lenErrs.length * 1.2);
+    const missing = Math.max(0, n - m);            // penalise only too FEW lines
+    const score = Math.max(0, Math.round(relScore * 0.5 + absScore * 0.3 + lenScore * 0.2 - missing * 15));
     return {
       score,
-      angleErr: +(sAngle / n).toFixed(2),
-      lengthErrPct: +(sLen / n).toFixed(1),
-      metrics: { meanAngleErrDeg: +(sAngle / n).toFixed(2),
-                 meanLengthErrPct: +(sLen / n).toFixed(1),
-                 lineCountDelta: userLines.length - targetLines.length }
+      angleErr: +meanRel.toFixed(2),
+      lengthErrPct: +meanLen.toFixed(1),
+      metrics: { meanAngleErrDeg: +meanAbs.toFixed(2),      // absolute-orientation bias (signed)
+                 relAngleErrDeg: +meanRel.toFixed(2),        // relative-gap bias (signed)
+                 meanLengthErrPct: +meanLen.toFixed(1),      // relative-length bias (signed)
+                 lineCountDelta: m - n }
     };
   };
 
@@ -221,15 +344,18 @@
      Both sets are bbox-normalised, so size/position don't matter but aspect
      (proportion) does.                                                       */
   geom.scoreShape = function (targetPts, userPts) {
-    if (!userPts || userPts.length < 3) return { score: 0, iou: 0, aspectErrPct: 0, metrics: {} };
+    if (!userPts || userPts.length < 3 || extentOf(userPts) < MIN_EXTENT) {
+      return { score: 0, iou: 0, aspectErrPct: 0, metrics: { degenerate: true } };
+    }
     const T = resampleClosed(targetPts, 96);
     let U;
-    if (userPts.length < 60) U = resampleClosed(userPts, 120);           // sparse → densify along outline
+    if (userPts.length < 60) U = resampleClosed(userPts, 96);            // sparse → densify along outline
     else { const step = Math.ceil(userPts.length / 220); U = userPts.filter((_, i) => i % step === 0); }
     const nt = geom.normalizeShape(T), nu = geom.normalizeShape(U);
     const d1 = meanNearest(nu.pts, nt.pts);   // precision: marks near the outline
     const d2 = meanNearest(nt.pts, nu.pts);   // coverage: whole outline covered
-    const chamfer = (d1 + d2) / 2;            // normalised units (bbox diagonal = 1)
+    let chamfer = (d1 + d2) / 2;              // normalised units (bbox diagonal = 1)
+    if (chamfer < 0.004) chamfer = 0;         // sampling noise — a perfect copy scores 100
     const sim = Math.max(0, 1 - chamfer * 4.2);                          // ~IoU-like, for display/coach
     const score = Math.round(Math.max(0, Math.min(100, 100 - chamfer * 340)));
     const aspectErrPct = nt.aspect ? (nu.aspect - nt.aspect) / nt.aspect * 100 : 0;
@@ -247,14 +373,17 @@
      (its bend/apex) rather than an enclosed area. Symmetric Chamfer, bbox-
      normalised, so size/position don't matter.                              */
   geom.scoreCurve = function (targetPolyline, userPts) {
-    if (!userPts || userPts.length < 2) return { score: 0, iou: 0, metrics: {} };
+    if (!userPts || userPts.length < 2 || extentOf(userPts) < MIN_EXTENT) {
+      return { score: 0, iou: 0, metrics: { degenerate: true } };
+    }
     const T = geom.resample(targetPolyline, 80);
     let U;
     if (userPts.length < 40) U = geom.resample(userPts, 80);
     else { const step = Math.ceil(userPts.length / 200); U = userPts.filter((_, i) => i % step === 0); }
     const nt = geom.normalizeShape(T), nu = geom.normalizeShape(U);
     const d1 = meanNearest(nu.pts, nt.pts), d2 = meanNearest(nt.pts, nu.pts);
-    const chamfer = (d1 + d2) / 2;
+    let chamfer = (d1 + d2) / 2;
+    if (chamfer < 0.004) chamfer = 0;         // sampling noise — a perfect copy scores 100
     const sim = Math.max(0, 1 - chamfer * 4.2);
     const score = Math.round(Math.max(0, Math.min(100, 100 - chamfer * 340)));
     return { score, iou: +sim.toFixed(3), metrics: { iou: +sim.toFixed(3), chamfer: +chamfer.toFixed(4) } };

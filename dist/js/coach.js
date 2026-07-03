@@ -38,6 +38,16 @@
       if (estErr <= 6) return 'sharp self-read';
       if (estErr <= 15) return 'fair self-read';
       return 'you misjudged your own work';
+    },
+
+    // one line about the DIRECTION of self-estimates (signed calibration):
+    // a consistent lean matters more than any single gap
+    calibration(bias) {
+      if (bias == null) return '';
+      if (Math.abs(bias) < 4) return 'Your self-estimates are well calibrated.';
+      return bias > 0
+        ? `You tend to overestimate your work by ~${Math.round(bias)} pts — judge harder before the reveal.`
+        : `You tend to underestimate your work by ~${Math.round(Math.abs(bias))} pts — trust your eye more.`;
     }
   };
   A.coach = coach;

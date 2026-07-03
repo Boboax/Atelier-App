@@ -45,7 +45,8 @@
 
   // returns {now:[newly earned defs], earned:{id:ts}, all:ACH}
   function check(attempts) {
-    const ctx = { attempts: attempts || [], streak: A.habit.streak() };
+    // repeats (redraws of a seen answer) don't count toward achievements
+    const ctx = { attempts: (attempts || []).filter((a) => !a.repeat), streak: A.habit.streak() };
     const earned = A.store.get('ach', {});
     const now = [];
     for (const a of ACH) { try { if (a.test(ctx) && !earned[a.id]) { earned[a.id] = Date.now(); now.push(a); } } catch (e) {} }
@@ -77,9 +78,26 @@
     return increased ? r.name : null;
   }
 
-  // ---- daily challenge (rotates by date) ----
+  // ---- weakest scored drill by recent accuracy (genuine memory trials only) ----
+  function weakestDrill(attempts, minN) {
+    minN = minN || 3;
+    let worst = null, worstMean = Infinity;
+    for (const k of LADDER) {
+      const xs = (attempts || []).filter((a) => a.type === k && a.scored && !a.repeat && !a.recall)
+                                 .slice(-5).map((a) => a.score);
+      if (xs.length < minN) continue;
+      const m = xs.reduce((a, b) => a + b, 0) / xs.length;
+      if (m < worstMean) { worstMean = m; worst = k; }
+    }
+    return worst ? { exKey: worst, mean: Math.round(worstMean) } : null;
+  }
+
+  // ---- daily challenge: your WEAKEST drill (falls back to date-rotation until
+  //      there's enough data to know what that is) ----
   function todayStr() { const d = new Date(); return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'); }
-  function dailyChallenge() {
+  function dailyChallenge(attempts) {
+    const w = weakestDrill(attempts);
+    if (w) return { day: todayStr(), exKey: w.exKey, target: 3, focus: true };
     const pool = LADDER; const d = new Date();
     const idx = (d.getFullYear() * 372 + d.getMonth() * 31 + d.getDate()) % pool.length;
     return { day: todayStr(), exKey: pool[idx], target: 3 };
@@ -119,10 +137,19 @@
   const WARM_MS = 40 * 60 * 1000;
   function recommend(attempts) {
     const now = Date.now();
+    const today = todayStr();
     const percTs = (attempts || []).filter((a) => a.type === 'perc-angle' || a.type === 'perc-prop').map((a) => a.ts);
     const lastPerc = percTs.length ? Math.max.apply(null, percTs) : 0;
     if (!(lastPerc && now - lastPerc < WARM_MS)) {
       return { step: 'warmup', title: 'Warm up your eye', sub: 'a short perception warm-up (~8 rounds, no drawing) to prime accurate seeing' };
+    }
+    // Retention check (Lecoq's real test): once per day, redraw a figure you
+    // studied on a PREVIOUS day — cold, no study. Retrieval after a night's
+    // sleep is the strongest memory exercise in the app.
+    const doneRecallToday = (attempts || []).some((a) => a.recall && a.day === today);
+    const oldScored = (attempts || []).filter((a) => a.scored && !a.repeat && !a.recall && a.day && a.day < today && a.target);
+    if (!doneRecallToday && oldScored.length) {
+      return { step: 'recall', title: 'Retention check', sub: 'redraw a figure from a previous day — cold, from memory alone' };
     }
     const order = LADDER;
     const minLvl = Math.min.apply(null, order.map((k) => A.curr.level(k)));
@@ -130,16 +157,28 @@
       const pick = order.find((k) => A.curr.level(k) < GRAD) || order[0];
       return { step: 'build', exKey: pick, title: 'Practice ' + A.curr.def(pick).name, sub: 'build accuracy here (Lv ' + A.curr.level(pick) + ')' };
     }
+    // Spaced review: serve the most-overdue drill before anything new — skills
+    // decay on their own schedule, and distributed retrieval is what holds them.
+    const due = A.curr.dueDrills(today).filter((d) => LADDER.indexOf(d.key) >= 0);
+    if (due.length) {
+      const pick = due[0].key;
+      const late = -due[0].due;
+      return { step: 'build', exKey: pick, title: 'Review ' + A.curr.def(pick).name,
+               sub: late > 0 ? ('due for review — last practised ' + late + ' day' + (late === 1 ? '' : 's') + ' past its interval') : 'due for review today (spaced practice)' };
+    }
     // Basics solid → Application: bring in the real-subject (Module 4) drills you
     // haven't tried yet, in classical order, then settle into mixed maintenance.
     const m4 = ['contour', 'negative', 'bargue', 'value', 'master'];
     const tried = new Set((attempts || []).map((a) => a.type));
     const nextM4 = m4.find((k) => !tried.has(k));
     if (nextM4) return { step: 'reference', exKey: nextM4, title: 'Try ' + A.curr.def(nextM4).name, sub: 'apply your eye to a real subject' };
+    // Maintenance: point the mixed work at the weakest drill, not a rotation
+    const w = weakestDrill(attempts);
+    if (w) return { step: 'build', exKey: w.exKey, title: 'Sharpen ' + A.curr.def(w.exKey).name, sub: 'your weakest drill right now (recent mean ' + w.mean + ')' };
     return { step: 'mixed', title: 'Mixed session', sub: 'keep it sharp — interleave drills, revisit the plates' };
   }
 
   A.game = { masteryPoints, rank, check, ACH, personalBest, noteStreak, rankUp,
              dailyChallenge, dailyProgress, markDailyDoneOnce, weeklyRecap, starTier, recommend,
-             rankNames: RANKS.map((r) => r.name) };
+             weakestDrill, rankNames: RANKS.map((r) => r.name) };
 })(window.A = window.A || {});

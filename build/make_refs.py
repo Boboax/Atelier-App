@@ -9,6 +9,13 @@ SRC = r"C:\Users\Bo\Dropbox\Drawing"
 OUT = os.path.join(os.path.dirname(__file__), "..", "src", "data", "refs.js")
 
 # (filename, id, title, category, group-note, max_dimension)
+#
+# !! The ids/titles below MUST stay in sync with what the app expects:
+#    ui.js BARGUE_ORDER = ['bargue-feet','bargue-foot','bargue-hand','bargue-head']
+#    and with any past attempts' refId. Changing an id orphans history entries
+#    and breaks the plate-course progression.
+# The Bargue filenames are placeholders — set them to the actual block-in
+# files in the Dropbox source folder before running.
 ITEMS = [
     ("1.PNG", "ws-lines-1",  "Straight lines — set 1", "lines",     "Worksheet", 1100),
     ("2.PNG", "ws-lines-2",  "Straight lines — set 2", "lines",     "Worksheet", 1100),
@@ -16,10 +23,10 @@ ITEMS = [
     ("4.jpg", "ws-poly-2",   "Polygons — set 2",       "polygons",  "Worksheet", 1100),
     ("5.jpg", "ws-env-1",    "Organic shapes — set 1", "envelopes", "Worksheet", 1100),
     ("6.jpg", "ws-env-2",    "Organic shapes — set 2", "envelopes", "Worksheet", 1100),
-    ("Plate I,10 - Foot of Germanicus 2.JPG", "bargue-foot", "Foot of Germanicus (Pl. I,10)", "bargue", "Bargue plate", 1500),
-    ("Plate I,13 2.JPG", "bargue-hand-13", "Hand, resting (Pl. I,13)", "bargue", "Bargue plate", 1500),
-    ("Plate I,14 - Hand holding a whetstone 2.JPG", "bargue-hand-14", "Hand with whetstone (Pl. I,14)", "bargue", "Bargue plate", 1500),
-    ("IMG_7793 2.JPG", "bargue-cardinal", "Cardinal Ximenes, head (block-in)", "bargue", "Bargue plate", 1500),
+    ("bargue-feet-blockin.jpg", "bargue-feet", "Feet — block-in (Bargue Pl. 6)",          "bargue", "Bargue plate", 440),
+    ("bargue-foot-blockin.jpg", "bargue-foot", "Foot — block-in (Bargue Pl. 10)",         "bargue", "Bargue plate", 440),
+    ("bargue-hand-blockin.jpg", "bargue-hand", "Hand — block-in (Bargue Pl. 22)",         "bargue", "Bargue plate", 440),
+    ("bargue-head-blockin.jpg", "bargue-head", "Head, profile — block-in (Bargue Pl. 34)","bargue", "Bargue plate", 440),
 ]
 
 def encode(path, maxdim):
@@ -36,10 +43,16 @@ def encode(path, maxdim):
 
 refs = []
 total = 0
+missing = [fn for fn, *_ in ITEMS if not os.path.exists(os.path.join(SRC, fn))]
+if missing:
+    # never write a truncated refs.js — a missing plate would silently break
+    # the plate course and orphan past attempts
+    import sys
+    for fn in missing:
+        print("MISSING:", os.path.join(SRC, fn))
+    sys.exit(1)
 for fn, rid, title, cat, group, maxdim in ITEMS:
     p = os.path.join(SRC, fn)
-    if not os.path.exists(p):
-        print("MISSING:", p); continue
     w, h, data, nbytes = encode(p, maxdim)
     total += nbytes
     refs.append({"id": rid, "title": title, "category": cat, "group": group,

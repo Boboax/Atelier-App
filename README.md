@@ -19,8 +19,12 @@ stays only on the device.
 cd Atelier
 python build/make_refs.py    # only if you change bundled images
 python build/make_icons.py   # only if you change the icon
-node   build/build.js        # regenerates Atelier.html
+node   build/build.js        # regenerates dist/ AND Atelier.html
 ```
+`build.js` is the one build step: it refreshes `dist/` from `src/` and stamps
+the service-worker cache name + `A.BUILD` from the clock, so every deploy
+automatically invalidates the previous offline cache. Never edit `dist/` by
+hand. `src/tests.html` is the self-test page (open it in a browser).
 
 ## Put it on the iPad (offline, no App Store)
 
@@ -54,25 +58,45 @@ track **systematic bias** (e.g. "you rotate lines +4° clockwise") in Stats.
 As your rolling accuracy holds above 85%, the study glance shortens and
 difficulty rises automatically.
 
-## Research-backed training mechanics (v2)
+## Research-backed training mechanics (v3)
 
 Grounded in drawing-perception studies and motor-learning science:
 
 - **Judge before you see.** Before each reveal you rate your own accuracy; the app
-  shows guess-vs-actual and a "self-awareness" trend. (Error self-estimation builds
-  the internal error-detector — Chiviacowsky & Wulf.)
+  shows guess-vs-actual, a "self-awareness" trend and your signed calibration
+  (over/under-confidence). (Error self-estimation builds the internal
+  error-detector — Chiviacowsky & Wulf.)
 - **One coaching cue + faded feedback.** Reveal gives a single corrective ("aim
-  anticlockwise"); the full metric breakdown fades out as you level up, so you stop
-  depending on it (guidance hypothesis).
+  anticlockwise"); the full metric breakdown appears less and less often as you
+  level up (guidance hypothesis) — but a "Show breakdown" button keeps it
+  available on request (self-controlled feedback, OPTIMAL theory).
+- **Retention hold.** From level 4 a short "picture it" pause sits between hide
+  and draw, so the drawing comes from encoded memory, not the afterimage. And a
+  daily **Retention check** re-serves a figure you studied on a previous day —
+  cold, no study — Lecoq's real test.
+- **Spaced review.** Each drill carries a Leitner-style review interval
+  (1→2→4→7→14 days); the recommendation engine serves the most-overdue drill
+  before anything new (distributed practice).
 - **Mixed sessions.** Interleaved practice (shuffling drill types) feels harder but
   builds more durable, transferable skill than repeating one drill (contextual
-  interference). Plus a quick warm-up and a daily "weakest drill" focus.
+  interference). Plus a quick warm-up, a daily challenge that targets your
+  **weakest drill**, and a fatigue watch that suggests stopping when accuracy
+  sags (short high-quality sessions beat massed grinding).
+- **Honest promotion.** Only genuine first-look memory trials feed the level
+  gate (85% sustained across ≥2 days); correction redraws are recorded but
+  excluded, and each mid-drill glance costs level credit.
 - **See first.** Perception-only drills (judge an angle / proportion with no drawing)
-  attack the real bottleneck — misperception of the subject (Cohen & Bennett). Plus a
-  flip/upside-down reference toggle and a contour (edges) drill (Betty Edwards).
+  attack the real bottleneck — misperception of the subject (Cohen & Bennett) —
+  with randomised start anchors so you judge the quantity, not the distance from
+  a fixed anchor. Plus a flip/upside-down reference toggle and a contour (edges)
+  drill (Betty Edwards).
 - **Beginner on-ramp.** First-run guide, a "?" how-to in every drill, fading sighting
-  guides (plumb line, horizon, thirds, angle ticks), and a guided multi-stage Bargue
-  block-in (envelope → facet → refine).
+  guides (plumb line, horizon, thirds, angle ticks), a guided multi-stage Bargue
+  block-in (envelope → facet → refine), and an "ease off" nudge when a study
+  stare runs past ~2× your own average glance.
+- **Comfort.** Full dark mode for evening practice (the drawing paper stays
+  white); a 7-day streak earns a rest day so one missed evening doesn't zero
+  the habit.
 
 Note: "confident single strokes" (a design-drawing idea, not classical) was deliberately
 left out as a scored dimension — motor skill is a minor source of drawing error, so the

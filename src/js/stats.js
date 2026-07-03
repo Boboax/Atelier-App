@@ -31,16 +31,24 @@
     },
 
     // daily mean score (optionally for one type) → [{day, score, n}]
+    // Objective, first-look trials only: self-ratings, repeats and recalls
+    // would distort the trend (and levelling up makes scores DIP by design —
+    // that's progress, not decline).
     dailyTrend(attempts, type) {
-      const f = type ? attempts.filter((a) => a.type === type) : attempts;
+      let f = attempts.filter((a) => a.scored && !a.repeat && !a.recall);
+      if (type) f = f.filter((a) => a.type === type);
       const byDay = {};
       for (const a of f) { (byDay[a.day] || (byDay[a.day] = [])).push(a.score); }
       return Object.keys(byDay).sort().map((d) => ({ day: d, score: Math.round(mean(byDay[d])), n: byDay[d].length }));
     },
 
-    // systematic bias for a scored type
+    // systematic bias for a scored type — over a RECENT window, not all history.
+    // A bias you fixed three weeks ago must not keep prescribing a counter-
+    // correction; the coach should describe the eye you have NOW.
+    BIAS_WINDOW: 25,
     bias(attempts, type) {
-      const f = attempts.filter((a) => a.type === type && a.metrics);
+      const f = attempts.filter((a) => a.type === type && a.metrics && !a.repeat)
+                        .slice(-stats.BIAS_WINDOW);
       if (type === 'line') {
         const ae = f.map((a) => a.metrics.angleErrDeg).filter((v) => v != null);
         const le = f.map((a) => a.metrics.lengthErrPct).filter((v) => v != null);
@@ -64,14 +72,22 @@
       return f.map((a) => ({ x: a.studySec, y: a.score }));
     },
 
-    // how well self-estimates match actual scores (lower gap = better self-read)
+    // how well self-estimates match actual scores (lower gap = better self-read).
+    // meanGap/bias use the recent window (current calibration); the daily trend
+    // spans all history (that's its point).
     selfAwareness(attempts) {
       const f = attempts.filter((a) => a.selfEstimate != null && a.estErr != null);
       if (!f.length) return null;
       const byDay = {};
       for (const a of f) (byDay[a.day] || (byDay[a.day] = [])).push(a.estErr);
       const trend = Object.keys(byDay).sort().map((d) => ({ day: d, score: Math.round(100 - mean(byDay[d])), n: byDay[d].length }));
-      return { n: f.length, meanGap: +mean(f.map((a) => a.estErr)).toFixed(1), trend };
+      const recent = f.slice(-stats.BIAS_WINDOW);
+      // signed bias: + = overconfident (estimates above reality), − = underconfident
+      const signed = recent.map((a) => (a.estBias != null ? a.estBias
+                                        : (a.selfEstimate != null && a.score != null ? a.selfEstimate - a.score : null)))
+                           .filter((v) => v != null);
+      return { n: f.length, meanGap: +mean(recent.map((a) => a.estErr)).toFixed(1),
+               bias: signed.length ? +mean(signed).toFixed(1) : null, trend };
     }
   };
 

@@ -143,6 +143,9 @@
     set(key, val) {
       try { localStorage.setItem(keyPrefix() + key, JSON.stringify(val)); } catch (e) {}
     },
+    remove(key) {                      // profile-aware — callers must never hand-build prefixes
+      try { localStorage.removeItem(keyPrefix() + key); } catch (e) {}
+    },
 
     /* ---- backup / restore ---------------------------------------------- */
     async exportAll() {                  // backs up the ACTIVE profile only
@@ -160,22 +163,48 @@
     },
     async importAll(data, { merge } = { merge: false }) {   // restores INTO the active profile
       if (!data || data.app !== 'atelier') throw new Error('Not an Atelier backup file.');
-      if (!merge) { await store.clearAttempts(); }
+      if (!merge) {
+        await store.clearAttempts();
+        // a clean restore replaces the profile's settings too — keys earned
+        // AFTER the backup (levels, achievements, PBs) must not survive and
+        // mix with the restored state
+        const pre = keyPrefix(), isDefault = currentPid() === 'default', del = [];
+        for (let i = 0; i < localStorage.length; i++) {
+          const k = localStorage.key(i);
+          if (!k || k.indexOf(pre) !== 0) continue;
+          if (isDefault && /^atelier:[^:]+:/.test(k)) continue;   // never touch other profiles
+          del.push(k);
+        }
+        del.forEach((k) => localStorage.removeItem(k));
+      }
       if (data.localStorage) {
         for (const k in data.localStorage) {
           const bare = k.replace(/^atelier:(?:[^:]+:)?/, '');   // strip any old prefix → re-namespace to current
           if (bare) localStorage.setItem(keyPrefix() + bare, data.localStorage[k]);
         }
       }
-      if (Array.isArray(data.attempts)) {
+      // IDB writes are transactional — wait for commit and surface failures,
+      // so "Backup restored" is never toasted over a silently-aborted restore
+      const txDone = (os) => new Promise((res, rej) => {
+        const t = os.transaction;
+        t.oncomplete = () => res();
+        t.onerror = () => rej(t.error || new Error('restore transaction failed'));
+        t.onabort = () => rej(t.error || new Error('restore transaction aborted'));
+      });
+      let wrote = 0;
+      if (Array.isArray(data.attempts) && data.attempts.length) {
         const os = await tx('attempts', 'readwrite');
-        for (const a of data.attempts) { const c = Object.assign({}, a); delete c.id; c.profileId = currentPid(); os.add(c); }
+        const done = txDone(os);
+        for (const a of data.attempts) { const c = Object.assign({}, a); delete c.id; c.profileId = currentPid(); os.add(c); wrote++; }
+        await done;
       }
-      if (Array.isArray(data.userRefs)) {
+      if (Array.isArray(data.userRefs) && data.userRefs.length) {
         const os = await tx('userRefs', 'readwrite');
-        for (const r of data.userRefs) os.put(r);
+        const done = txDone(os);
+        for (const r of data.userRefs) { os.put(r); wrote++; }
+        await done;
       }
-      return true;
+      return { ok: true, records: wrote };
     }
   };
 
