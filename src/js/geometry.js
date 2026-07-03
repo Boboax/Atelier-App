@@ -91,16 +91,20 @@
      scores (matched by index) plus a bonus for getting the *relative* angle
      between the first two lines right.                                       */
   geom.scoreAngles = function (targetLines, userLines) {
-    const n = Math.min(targetLines.length, userLines.length);
-    if (n === 0) return { score: 0, angleErr: 0, lengthErrPct: 0, metrics: {} };
+    if (!targetLines.length || !userLines.length) return { score: 0, angleErr: 0, lengthErrPct: 0, metrics: {} };
+    const angOf = (l) => Math.atan2(l[1][1] - l[0][1], l[1][0] - l[0][0]) * 180 / Math.PI;
     let sAngle = 0, sLen = 0, sScore = 0;
-    for (let i = 0; i < n; i++) {
-      const r = geom.scoreLine(targetLines[i], userLines[i]);
+    for (const t of targetLines) {
+      // match each target line to the user line of nearest (undirected) angle,
+      // so extra/construction strokes are ignored rather than penalised
+      let best = userLines[0], bd = Infinity;
+      for (const u of userLines) { let d = Math.abs(angOf(t) - angOf(u)) % 180; if (d > 90) d = 180 - d; if (d < bd) { bd = d; best = u; } }
+      const r = geom.scoreLine(t, best);
       sAngle += r.angleErr; sLen += r.lengthErrPct; sScore += r.score;
     }
-    // penalty for missing/extra lines
-    const countPenalty = Math.abs(targetLines.length - userLines.length) * 12;
-    const score = Math.max(0, Math.round(sScore / n - countPenalty));
+    const n = targetLines.length;
+    const missing = Math.max(0, targetLines.length - userLines.length);   // penalise only too FEW lines
+    const score = Math.max(0, Math.round(sScore / n - missing * 15));
     return {
       score,
       angleErr: +(sAngle / n).toFixed(2),
@@ -195,28 +199,65 @@
     return uni ? inter / uni : 0;
   };
 
-  /* ---- SHAPE scoring ------------------------------------------------------
-     IoU is the primary similarity. We curve it so that a "good" memory copy
-     (IoU≈0.8) lands around 90, since perfect overlap from memory is rare.
-     Aspect error is reported signed (+ = drawn too wide).                    */
+  // resample a CLOSED polygon's perimeter to n evenly-spaced points
+  function resampleClosed(pts, n) { return geom.resample(pts.concat([pts[0]]), n); }
+  // mean distance from each point in A to its nearest point in B
+  function meanNearest(A, B) {
+    let s = 0;
+    for (const a of A) {
+      let m = Infinity;
+      for (const b of B) { const dx = a[0] - b[0], dy = a[1] - b[1]; const d = dx * dx + dy * dy; if (d < m) m = d; }
+      s += Math.sqrt(m);
+    }
+    return A.length ? s / A.length : 0;
+  }
+
+  /* ---- SHAPE scoring (contour distance — stroke-count agnostic) -----------
+     Filled-area IoU punished shapes drawn from several short strokes (the
+     concatenated fill self-intersects). Instead we measure how close the
+     user's marks lie to the target outline AND how fully they cover it
+     (symmetric Chamfer distance), which is independent of stroke count and
+     fill — a faceted block-in scores like a single clean outline.
+     Both sets are bbox-normalised, so size/position don't matter but aspect
+     (proportion) does.                                                       */
   geom.scoreShape = function (targetPts, userPts) {
-    if (userPts.length < 3) return { score: 0, iou: 0, aspectErrPct: 0, metrics: {} };
-    const iou = geom.shapeIoU(targetPts, userPts);
-    const nt = geom.normalizeShape(targetPts), nu = geom.normalizeShape(userPts);
+    if (!userPts || userPts.length < 3) return { score: 0, iou: 0, aspectErrPct: 0, metrics: {} };
+    const T = resampleClosed(targetPts, 96);
+    let U;
+    if (userPts.length < 60) U = resampleClosed(userPts, 120);           // sparse → densify along outline
+    else { const step = Math.ceil(userPts.length / 220); U = userPts.filter((_, i) => i % step === 0); }
+    const nt = geom.normalizeShape(T), nu = geom.normalizeShape(U);
+    const d1 = meanNearest(nu.pts, nt.pts);   // precision: marks near the outline
+    const d2 = meanNearest(nt.pts, nu.pts);   // coverage: whole outline covered
+    const chamfer = (d1 + d2) / 2;            // normalised units (bbox diagonal = 1)
+    const sim = Math.max(0, 1 - chamfer * 4.2);                          // ~IoU-like, for display/coach
+    const score = Math.round(Math.max(0, Math.min(100, 100 - chamfer * 340)));
     const aspectErrPct = nt.aspect ? (nu.aspect - nt.aspect) / nt.aspect * 100 : 0;
-    // Curve: IoU 0→0, 0.5→55, 0.8→90, 0.95→99
-    const score = Math.round(Math.max(0, Math.min(100, Math.pow(iou, 0.62) * 100)));
     return {
       score,
-      iou: +iou.toFixed(3),
+      iou: +sim.toFixed(3),
       aspectErrPct: +aspectErrPct.toFixed(1),
-      metrics: {
-        iou: +iou.toFixed(3),
-        aspectErrPct: +aspectErrPct.toFixed(1),
-        targetAspect: +nt.aspect.toFixed(2),
-        userAspect: +nu.aspect.toFixed(2)
-      }
+      metrics: { iou: +sim.toFixed(3), chamfer: +chamfer.toFixed(4), aspectErrPct: +aspectErrPct.toFixed(1),
+                 targetAspect: +nt.aspect.toFixed(2), userAspect: +nu.aspect.toFixed(2) }
     };
+  };
+
+  /* ---- CURVE scoring (open contour, stroke-count agnostic) ---------------
+     Like shape scoring but for an OPEN polyline — match the path of the curve
+     (its bend/apex) rather than an enclosed area. Symmetric Chamfer, bbox-
+     normalised, so size/position don't matter.                              */
+  geom.scoreCurve = function (targetPolyline, userPts) {
+    if (!userPts || userPts.length < 2) return { score: 0, iou: 0, metrics: {} };
+    const T = geom.resample(targetPolyline, 80);
+    let U;
+    if (userPts.length < 40) U = geom.resample(userPts, 80);
+    else { const step = Math.ceil(userPts.length / 200); U = userPts.filter((_, i) => i % step === 0); }
+    const nt = geom.normalizeShape(T), nu = geom.normalizeShape(U);
+    const d1 = meanNearest(nu.pts, nt.pts), d2 = meanNearest(nt.pts, nu.pts);
+    const chamfer = (d1 + d2) / 2;
+    const sim = Math.max(0, 1 - chamfer * 4.2);
+    const score = Math.round(Math.max(0, Math.min(100, 100 - chamfer * 340)));
+    return { score, iou: +sim.toFixed(3), metrics: { iou: +sim.toFixed(3), chamfer: +chamfer.toFixed(4) } };
   };
 
   /* ---- Convex hull (used by generators & for cleaning user polygons) ----- */

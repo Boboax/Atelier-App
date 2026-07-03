@@ -95,6 +95,15 @@
       let cov = 0; for (let i = 0; i < ref.length; i++) cov += ref[i];
       return { iou: +v.toFixed(3), score: Math.round(Math.max(0, Math.min(100, Math.pow(v, 0.62) * 100))), coverage: cov / (G * G) };
     },
+    // height:width of the thresholded subject's bounding box (for a proportion check).
+    // Returns null if the mask is empty. Region/threshold same meaning as score().
+    aspect(img, threshold, invert, region) {
+      if (!img) return null;
+      const m = maskFromImage(img, threshold == null ? 128 : threshold, invert, region);
+      const bb = bbox(m);
+      if (!bb || bb.w < 2 || bb.h < 2) return null;
+      return bb.h / bb.w;
+    },
     // a tinted preview of the extracted subject mask, as a canvas (for overlay)
     maskPreview(img, threshold, invert, region) {
       const ref = maskFromImage(img, threshold == null ? 128 : threshold, invert, region);

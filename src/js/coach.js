@@ -20,6 +20,10 @@
           return `Length a touch too ${l > 0 ? 'long' : 'short'} (~${Math.abs(l)}%) — ${l > 0 ? 'shorten' : 'extend'} it deliberately.`;
         return 'Dialled in — angle and length both close.';
       }
+      if (exKey === 'curve') {
+        if (m.iou != null && m.iou < 0.6) return 'Follow the bend more closely — pin the start, end and apex (furthest bow) first.';
+        return 'Nice curve — smooth and close to the path.';
+      }
       // shapes
       if (m.aspectErrPct != null && Math.abs(m.aspectErrPct) >= 8)
         return `Proportion off — you drew it too ${m.aspectErrPct > 0 ? 'wide; make it taller/narrower' : 'tall; make it wider'} (~${Math.abs(m.aspectErrPct)}%).`;

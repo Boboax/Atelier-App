@@ -17,7 +17,7 @@
   function makeItem(r, bundled) {
     return { id: r.id, title: r.title, category: r.category || 'user',
              group: r.group || (bundled ? 'Bundled' : 'Imported'),
-             src: r.src, w: r.w, h: r.h, bundled: !!bundled };
+             src: r.src, w: r.w, h: r.h, bundled: !!bundled, attrib: r.attrib || '' };
   }
 
   const library = {

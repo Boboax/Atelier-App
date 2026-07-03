@@ -13,7 +13,7 @@ const readB64 = (p) => fs.readFileSync(path.join(SRC, p)).toString('base64');
 const JS_ORDER = [
   'data/refs.js',
   'js/geometry.js', 'js/storage.js', 'js/generators.js', 'js/canvas.js',
-  'js/curriculum.js', 'js/coach.js', 'js/exercises.js', 'js/perceive.js', 'js/library.js', 'js/stats.js',
+  'js/curriculum.js', 'js/coach.js', 'js/gamify.js', 'js/exercises.js', 'js/perceive.js', 'js/library.js', 'js/stats.js',
   'js/history.js', 'js/imgscore.js', 'js/ui.js', 'js/app.js'
 ];
 

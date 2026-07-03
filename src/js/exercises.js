@@ -18,7 +18,8 @@
 
   // guided block-in stages for reference drills (general → specific)
   const STAGES = {
-    bargue: ['Block the outer envelope — the largest straight lines that contain the whole form.',
+    bargue: ['Plot the extreme points — top, bottom, widest left & right — and a light plumb line through the form. (Tap “Measure” to check proportions against a unit.)',
+             'Block the outer envelope — the largest straight lines that connect those points.',
              'Facet the big internal divisions inside that envelope.',
              'Refine the contour — round the straights into the true edges.'],
     negative: ['Draw the single largest negative shape.',
@@ -83,7 +84,9 @@
     const mode = A.store.get('guidesMode', 'auto');
     if (mode === 'on') return true;
     if (mode === 'off') return false;
-    return !!this.def.scored && this.level <= 3;   // auto
+    // auto: scaffolds for beginners, and always for Bargue (the plumb/horizon are
+    // part of its construction method)
+    return (!!this.def.scored && this.level <= 3) || this.exKey === 'bargue';
   };
   Drill.prototype.toggleGuides = function () {
     this.surface.guides = !this.surface.guides; this.surface.redraw();
@@ -133,6 +136,7 @@
     // record the ACTUAL look time (self-chosen for beginners) — shrinking it is progress
     this.studySec = +Math.max(0.1, (performance.now() - this._studyStart) / 1000).toFixed(1);
     this.phase = 'draw';
+    this.surface.measureMode = false;   // back to drawing (calipers already laid stay visible)
     this.surface.ghostStudy = false;
     this.surface.setGhost(null);        // hide reference
     this.surface.guides = this._computeGuides();
@@ -140,8 +144,23 @@
     this.surface.clearMarks();
     this.stages = (!this.def.scored && STAGES[this.exKey]) ? STAGES[this.exKey] : null;
     this.stage = 0;
+    // recall budget: soft target for committing the marks before the memory trace
+    // fades (scored drills only — reference copies are deliberately unhurried)
+    this.drawBudget = this.def.scored ? (this.def.draw || null) : null;
+    this.drawElapsed = 0;
     this.drawStart = performance.now();
+    this._startDrawTimer();
     this._emit();
+  };
+
+  // ticks the recall phase so the UI can show elapsed draw time (and the over-budget
+  // nudge). Self-paced — it never ends the phase; the learner commits with Evaluate.
+  Drill.prototype._startDrawTimer = function () {
+    clearInterval(this._timer);
+    this._timer = setInterval(() => {
+      this.drawElapsed = (performance.now() - this.drawStart) / 1000;
+      if (this.onTick) this.onTick(this);
+    }, 200);
   };
 
   // advance the guided block-in stage, with a brief re-glance at the reference
@@ -179,7 +198,7 @@
 
   Drill.prototype.canEvaluate = function () {
     if (this.surface.isEmpty()) return false;
-    if (this.exKey === 'line') return this.surface.totalPoints() >= 2;
+    if (this.exKey === 'line' || this.exKey === 'curve') return this.surface.totalPoints() >= 2;
     if (this.exKey === 'polygon' || this.exKey === 'envelope') return this.surface.totalPoints() >= 3;
     return true;
   };
@@ -192,20 +211,25 @@
 
   Drill.prototype.evaluate = function () {
     if (this.phase !== 'draw' || !this.canEvaluate()) return;
+    clearInterval(this._timer);
     this.drawSec = (performance.now() - this.drawStart) / 1000;
     const strokes = this.surface.strokesDesign();
 
     if (this.def.scored) {
       let r;
       if (this.exKey === 'line') {
-        const s = this._userLineFromLongest(strokes) || strokes[0];
-        r = A.geom.scoreLine(this.target.lines[0], A.geom.bestFitSegment(s));   // PCA best-fit
+        // one line may be built from several collinear strokes (a long line is hard
+        // to draw in a single pass) — best-fit across ALL points so the full span
+        // and angle are measured, not just one segment.
+        r = A.geom.scoreLine(this.target.lines[0], A.geom.bestFitSegment(this.surface.pointsDesign()));
       } else if (this.exKey === 'angles') {
         const ul = strokes.filter((s) => s.length >= 2).map((s) => A.geom.bestFitSegment(s));
         const angOf = (l) => Math.atan2(l[1][1] - l[0][1], l[1][0] - l[0][0]);
         const ut = ul.slice().sort((a, b) => angOf(a) - angOf(b));
         const tt = this.target.lines.slice().sort((a, b) => angOf(a) - angOf(b));
         r = A.geom.scoreAngles(tt, ut);
+      } else if (this.exKey === 'curve') {
+        r = A.geom.scoreCurve(this.target.polyline, this.surface.pointsDesign());
       } else {
         // score from ALL strokes combined (a shape drawn in several strokes is fine)
         r = A.geom.scoreShape(this.target.polygon, this.surface.pointsDesign());
@@ -234,15 +258,15 @@
     // faded feedback (guidance hypothesis): full metric breakdown only early on
     // or intermittently; otherwise just the score + one cue.
     const showDetail = (this.level <= 2) || (this.sessionIndex % 3 === 1);
-    const adv = A.curr.recordScore(this.exKey, r.score);
+    const adv = A.curr.recordScore(this.exKey, r.score, dayKey());
     this.level = adv.level;
     this.result = { score: r.score, selfRated: false, metrics: r.metrics,
                     selfEstimate: est, estErr, coaching, showDetail, levelChange: adv };
     this._record(r.score, false, r.metrics, est);
     this.phase = 'reveal';
     this.surface.setPhase('reveal');
+    if (this.onResult) this.onResult(this);   // bump set/session counters BEFORE rendering
     this._emit();
-    if (this.onResult) this.onResult(this);
   };
 
   Drill.prototype.setGhostOpacity = function (o) {
@@ -289,7 +313,9 @@
     this.surface.clearMarks();
     this.phase = 'draw';
     this.surface.ghostStudy = false; this.surface.setGhost(null); this.surface.setPhase('draw');
+    this.drawElapsed = 0;
     this.drawStart = performance.now();
+    this._startDrawTimer();
     this._emit();
   };
 

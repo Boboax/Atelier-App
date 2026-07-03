@@ -10,10 +10,11 @@
   'use strict';
 
   function targetPathsDesign(att) {
-    const t = att.target; if (!t) return { lines: [], polys: [] };
-    if (t.kind === 'line' || t.kind === 'angles') return { lines: t.lines, polys: [] };
-    if (t.polygon) return { lines: [], polys: [t.polygon] };
-    return { lines: [], polys: [] };
+    const t = att.target; if (!t) return { lines: [], polys: [], curves: [] };
+    if (t.kind === 'line' || t.kind === 'angles') return { lines: t.lines, polys: [], curves: [] };
+    if (t.polyline) return { lines: [], polys: [], curves: [t.polyline] };
+    if (t.polygon) return { lines: [], polys: [t.polygon], curves: [] };
+    return { lines: [], polys: [], curves: [] };
   }
 
   const history = {
@@ -30,6 +31,10 @@
       });
       tp.lines.forEach((ln) => {
         g += `<line x1="${M(ln[0][0])}" y1="${M(ln[0][1])}" x2="${M(ln[1][0])}" y2="${M(ln[1][1])}" stroke="rgba(0,0,0,0.4)" stroke-width="1.5"/>`;
+      });
+      (tp.curves || []).forEach((cv) => {
+        const d = 'M' + cv.map((p) => M(p[0]) + ',' + M(p[1])).join(' L');
+        g += `<path d="${d}" fill="none" stroke="rgba(0,0,0,0.4)" stroke-width="1.5"/>`;
       });
       // user marks (ink)
       (att.strokes || []).forEach((s) => {
@@ -54,6 +59,7 @@
         ctx.closePath(); ctx.fill(); ctx.stroke();
       });
       tp.lines.forEach((ln) => { ctx.beginPath(); ctx.moveTo(M(ln[0][0]), M(ln[0][1])); ctx.lineTo(M(ln[1][0]), M(ln[1][1])); ctx.stroke(); });
+      (tp.curves || []).forEach((cv) => { ctx.beginPath(); ctx.moveTo(M(cv[0][0]), M(cv[0][1])); for (let i = 1; i < cv.length; i++) ctx.lineTo(M(cv[i][0]), M(cv[i][1])); ctx.stroke(); });
       ctx.restore();
       // user strokes up to progress
       const strokes = att.strokes || [];
