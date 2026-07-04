@@ -32,9 +32,8 @@
 
   const ui = { view: 'home' };
   let surface, drill, attemptsCache = null;
-  // Bargue plates in the course's own order (by plate number: Pl.6 feet → 10 foot → 22 hand → 34 head)
-  const BARGUE_ORDER = ['bargue-feet', 'bargue-foot', 'bargue-hand', 'bargue-head'];
-  const BARGUE_PASS = 85;   // ~85% best before a plate counts as "done" (the learning sweet spot)
+  // Bargue plate order + pass mark live in gamify (A.game.PLATES / PLATE_PASS) —
+  // they feed mastery points and achievements too
 
   /* ---- bootstrap --------------------------------------------------------- */
   ui.init = async function () {
@@ -105,16 +104,8 @@
     const btns = { warmup: 'Warm up', mixed: 'Start', resume: 'Resume', reference: 'Try', build: 'Practice', recall: 'Test me' };
     return { step: r.step, exKey: r.exKey || '', title: r.title, sub: r.sub, btn: btns[r.step] || 'Practice' };
   }
-  // big "Recommended now" card — used on Home only (the dashboard)
-  function recCard(all) {
-    const a = recAction(all);
-    return `<div class="card rec"><div class="row between center">
-      <div><div class="rec-tag">RECOMMENDED NOW</div><h2 style="margin-top:2px">${esc(a.title)}</h2>
-        <div class="small muted">${esc(a.sub)}</div></div>
-      <button class="btn" data-rec="${a.step}" data-recex="${esc(a.exKey)}">${a.btn} ›</button></div></div>`;
-  }
-  // slim one-line recommendation — used at the top of the Exercises menu so it
-  // doesn't duplicate Home's big card
+  // slim one-line recommendation — used at the top of the Exercises menu
+  // (Home surfaces the same engine as the Today's-plan checklist)
   function recLine(all) {
     const a = recAction(all);
     return `<div class="card rec slim"><div class="row between center">
@@ -163,6 +154,7 @@
   }
   function invalidate() { attemptsCache = null; }
   ui.invalidate = invalidate;   // other modules (perceive) record attempts too
+  ui.doRec = (step, exKey) => doRec(step, exKey);   // lets perceive chain into the next step
 
   /* ---- profiles (multi-user on one iPad) --------------------------------- */
   function refreshProfileChip() {
@@ -210,120 +202,146 @@
   /* ======================================================================
      HOME / TODAY
      ====================================================================== */
-  async function renderHome(v) {
-    const goal = A.habit.goalMin();
-    const mins = A.habit.todayMinutes();
-    const pct = Math.min(1, goal ? mins / goal : 0);
-    const streak = A.habit.streak();
-    const cal = A.habit.calendar(14);
-    const C = 2 * Math.PI * 34;
-    const calHtml = cal.map((d) => {
-      const lab = d.day.slice(8);
-      const cls = (d.met ? 'met ' : '') + (d.day === A.habit.today() ? 'today' : '');
-      return `<div class="d ${cls}" title="${d.day}: ${fmtMin(d.secs / 60)}">${lab}</div>`;
-    }).join('');
+  // Monday-aligned week index of a 'YYYY-MM-DD' key (for the weekly report ritual)
+  function weekIdxOf(day) { const p = day.split('-'); return Math.floor((Date.UTC(+p[0], +p[1] - 1, +p[2]) / 864e5 - 4) / 7); }
 
-    // ---- gamification: rank + achievements ----
+  async function renderHome(v) {
     const allAtts = await attempts();
     A.game.noteStreak();
     const rk = A.game.rank();
     const ach = A.game.check(allAtts);
-    const rankCard = `<div class="card"><div class="row between center">
-        <div><div class="small muted">Rank</div><h2 style="margin-top:1px">${esc(rk.name)}</h2></div>
-        <div class="tiny muted" style="text-align:right">${rk.points} pts${rk.next ? `<br>${rk.nextAt - rk.points} to ${esc(rk.next)}` : '<br>top rank'}</div></div>
-      <div class="rankbar"><div class="rankfill" style="width:${Math.round(rk.progress * 100)}%"></div></div></div>`;
-    const earnedCount = Object.keys(ach.earned).length;
-    const badges = A.game.ACH.map((a) => {
-      const got = !!ach.earned[a.id];
-      return `<div class="badge ${got ? '' : 'locked'}" title="${esc(a.desc)}"><div class="bic">${a.icon}</div><div class="bnm">${esc(a.name)}</div></div>`;
-    }).join('');
-    const achCard = `<div class="card"><div class="row between center"><h2>Achievements</h2>
-        <span class="muted small">${earnedCount}/${A.game.ACH.length}</span></div>
-      <div class="badges">${badges}</div></div>`;
+    const streak = A.habit.streak();
+    const bestStreak = A.store.get('bestStreak', 0);
+    const mins = A.habit.todayMinutes();
+    const sv = savedSession();
 
-    // ---- daily challenge + weekly recap ----
-    const dc = A.game.dailyChallenge(allAtts);   // targets your WEAKEST drill once known
-    const dp = A.game.dailyProgress(allAtts, dc);
-    const dcName = A.curr.def(dc.exKey) ? A.curr.def(dc.exKey).name : dc.exKey;
-    const dailyCard = `<div class="card"><div class="row between center">
-        <div><h2>Daily challenge</h2><div class="small muted">${dp.done}/${dc.target} · ${esc(dcName)}${dc.focus ? ' <span class="tag">weakest drill</span>' : ''}</div></div>
-        ${dp.complete ? '<span class="lvlpill" style="background:var(--good);color:#fff">✓ done</span>'
-                      : `<button class="btn soft sm" data-focus="${dc.exKey}">Start ›</button>`}</div></div>`;
+    // ---- today's plan: the one decision Home must support ----
+    const plan = A.game.dailyPlan(allAtts);
+    const planJustDone = plan.complete && A.habit.markPlanDone(plan.day);
+    const segRows = plan.segments.map((s, i) => `
+      <div class="planrow ${s.done ? 'done' : ''}">
+        <div class="pcheck">${s.done ? '✓' : (i + 1)}</div>
+        <div class="meta"><div class="nm">${esc(s.label)}</div>
+          <div class="tiny muted">${esc(s.sub)}${s.target > 1 ? ` · ${s.n}/${s.target}` : ''}</div></div>
+        ${s.done ? '' : `<button class="btn ${plan.segments.findIndex((x) => !x.done) === i ? '' : 'soft'} sm" data-rec="${s.step}" data-recex="${esc(s.exKey || '')}">Start ›</button>`}
+      </div>`).join('');
+    const pct = plan.segments.length ? plan.doneCount / plan.segments.length : 0;
+    const C = 2 * Math.PI * 34;
+    const cal = A.habit.calendar(14);
+    const dots = cal.map((d) => `<span class="pdot ${d.met ? 'met' : ''} ${d.day === A.habit.today() ? 'today' : ''}" title="${d.day}: ${fmtMin(d.secs / 60)}"></span>`).join('');
+    const resumeRow = sv ? `<button class="btn ghost block sm" data-rec="resume" style="margin-top:8px">Resume ${sv.kind === 'warmup' ? 'quick' : 'mixed'} session · ${sv.completed}/${sv.queue.length} ›</button>` : '';
+    const planCard = `<div class="card rec">
+      <div class="streak-hero">
+        <div class="ring"><svg width="84" height="84">
+          <circle cx="42" cy="42" r="34" fill="none" stroke="var(--hair)" stroke-width="8"/>
+          <circle cx="42" cy="42" r="34" fill="none" stroke="${plan.complete ? 'var(--good)' : 'var(--accent)'}" stroke-width="8"
+            stroke-linecap="round" stroke-dasharray="${C}" stroke-dashoffset="${C * (1 - pct)}"/>
+        </svg><div class="num"><b>${plan.doneCount}/${plan.segments.length}</b><span class="tiny muted">plan</span></div></div>
+        <div style="flex:1">
+          <div class="row between center"><h2>Today’s plan</h2>
+            <div><span class="flame">${streak > 0 ? '🔥' : '·'}</span> <b>${streak}</b> <span class="muted small">day streak${bestStreak > streak ? ` · best ${bestStreak}` : ''}</span></div></div>
+          <div class="tiny muted">${plan.complete ? 'Done for today — anything more is a bonus.' : 'Study → hide → draw from memory. The plan describes the day; any real practice counts.'}</div>
+        </div>
+      </div>
+      ${segRows}
+      ${resumeRow}
+      <div class="row between center" style="margin-top:10px">
+        <div class="pdots">${dots}</div>
+        <span class="tiny muted">${fmtMin(mins)} · ${A.habit.todayCount()} drills</span>
+      </div></div>`;
+
+    // ---- progression snapshot: the drill nearest promotion + compact levels ----
+    const scored = A.curr.EXERCISES.filter((e) => e.scored);
+    const snap = scored.map((e) => {
+      const win = A.curr.window(e.key);
+      const scores = win.map((w) => (typeof w === 'object' && w ? w.s : w));
+      const recent = scores.length ? Math.round(scores.reduce((a, b) => a + b, 0) / scores.length) : null;
+      return { e, lvl: A.curr.level(e.key), recent };
+    });
+    const focus = snap.filter((s) => s.recent != null && s.lvl < (s.e.maxLevel || 9))
+                      .sort((a, b) => b.recent - a.recent)[0] || snap[0];
+    const meeting = focus.recent != null && focus.recent >= 85;
+    const pills = snap.map((s) => `<span class="lvlpill" data-focus="${s.e.key}" style="cursor:pointer${s.lvl >= 9 ? ';background:var(--warn);color:#fff' : ''}">${esc(s.e.name.split(' ')[0])} ${s.lvl}</span>`).join(' ');
+    const progCard = `<div class="card"><div class="row between center"><h2>Progression</h2><button class="btn ghost sm" data-go="map">Journey ›</button></div>
+      <div class="exrow" data-focus="${focus.e.key}"><div class="meta">
+        <div class="nm">${esc(focus.e.name)} <span class="lvlpill">Lv ${focus.lvl}</span> <span class="tiny muted">nearest level-up</span></div>
+        <div class="tiny muted" style="margin:4px 0 2px">${focus.recent == null ? 'no drills yet at this level' : `recent accuracy ${focus.recent}%${meeting ? ' — on track to level up ✓' : ' (aim ~85%)'}`}</div>
+        <div class="accbar"><div class="accfill" style="width:${focus.recent == null ? 0 : Math.min(100, focus.recent)}%;background:${meeting ? 'var(--good)' : 'var(--accent)'}"></div><div class="accmark"></div></div>
+      </div><span class="muted">›</span></div>
+      <div style="margin-top:10px;line-height:2">${pills}</div></div>`;
+
+    // ---- how-to: novices only; afterwards the plan card carries the method ----
+    const howto = rk.index === 0 ? `<div class="card">
+        <h2>How to progress</h2>
+        <ol class="small muted" style="margin:8px 0 0;padding-left:20px;line-height:1.7">
+          <li><b>Warm up the eye</b> (2–3 min): judge angles &amp; proportions — no drawing.</li>
+          <li><b>Build accuracy</b>: Lines &amp; Angles → Curves → Polygons → Envelopes. Hold ~85% across a couple of days and the level rises on its own.</li>
+          <li><b>Lock it in</b>: the daily retention check + a Mixed Session a few times a week.</li>
+          <li><b>Apply it</b>: Module 4 — Contour, Negative Space, Bargue plates, Value, Master copy.</li>
+        </ol></div>` : '';
+
+    v.innerHTML = `
+      ${planCard}
+      ${progCard}
+      ${howto}
+      <div class="tiny muted" style="text-align:center;margin:6px 0 18px">Atelier v${esc(A.VERSION || '?')} · ${esc(A.BUILD || 'dev')}</div>`;
+    v.onclick = (e) => {
+      const rc = e.target.closest('[data-rec]'); if (rc) { doRec(rc.dataset.rec, rc.dataset.recex); return; }
+      const pd = e.target.closest('.pdot'); if (pd) { toast(pd.getAttribute('title') || ''); return; }
+      const f = e.target.closest('[data-focus]'); if (f) { startExercise(f.dataset.focus); return; }
+      const g = e.target.closest('[data-go]'); if (g) ui.go(g.dataset.go);
+    };
+
+    // ---- moments: rank ceremony > weekly report > achievement toast ----
+    const up = A.game.rankUp();
+    if (up) showRankUp(rk, allAtts);
+    else if (maybeWeeklyReport(allAtts)) { /* modal shown */ }
+    else if (ach.now.length) toast('Unlocked: ' + ach.now.map((a) => a.name).join(', '));
+    else if (planJustDone) toast('Today’s plan complete ✓');
+  }
+
+  // rank-up: a once-a-month event deserves more than a toast — the journey
+  // curve with the marker on its new node, plus proof of progress if we have it
+  function showRankUp(rk, allAtts) {
+    const desc = ['finding your eye', 'lines & angles', 'shapes & proportion', 'real subjects & plates', 'drawing from memory'][rk.index] || '';
+    const cmp = ['line', 'polygon', 'envelope', 'angles', 'curve'].map((t) => A.history.compare(allAtts, t)).find(Boolean);
+    const proof = cmp ? `<div class="insight" style="text-align:left">Proof it’s working: your ${esc(exName(cmp.type))} mean went ${cmp.early.mean} → ${cmp.late.mean} over ${cmp.spanDays} days.</div>` : '';
+    const sheet = openModal(`<h2 style="text-align:center">Rank up</h2>
+      <div class="scorebadge" style="text-align:center;display:block;font-size:34px;margin:6px 0">${esc(rk.name)}</div>
+      ${journeySVG(rk)}
+      <div class="small muted" style="text-align:center">${esc(desc)}${rk.next ? ` · ${rk.nextAt - rk.points} pts to ${esc(rk.next)}` : ''}</div>
+      ${proof}
+      <button class="btn block" data-done="1" style="margin-top:12px">Onward</button>`);
+    sheet.addEventListener('click', (e) => { if (e.target.closest('[data-done]')) closeModal(); });
+  }
+
+  // weekly report card: once, on the first Home visit of a new week
+  function maybeWeeklyReport(allAtts) {
+    const wk = weekIdxOf(A.habit.today());
+    const seen = A.store.get('weekSeen', null);
+    if (seen === wk) return false;
+    A.store.set('weekSeen', wk);
+    if (seen == null) return false;                      // first ever visit — nothing to report
     const wr = A.game.weeklyRecap(allAtts);
-    const weekCard = wr ? `<div class="card"><h2>This week</h2>
-      <div class="kpi" style="margin-top:8px">
+    if (!wr || wr.drills < 5) return false;              // too little practice to be worth a ritual
+    const sa = A.stats.selfAwareness(allAtts);
+    const calLine = sa && sa.bias != null ? A.coach.calibration(sa.bias) : '';
+    const lb = A.stats.bias(allAtts, 'line');
+    const biasLine = lb && lb.n >= 5 ? `Line angle bias is ${lb.angle.mean > 0 ? '+' : ''}${lb.angle.mean}° right now.` : '';
+    const recalls = allAtts.filter((a) => a.recall && Date.now() - a.ts < 7 * 864e5);
+    const recallLine = recalls.length ? `Best retention check: ${Math.max.apply(null, recalls.map((a) => a.score))}.` : '';
+    const sheet = openModal(`<h2>Your week</h2>
+      <div class="kpi" style="margin:12px 0">
         <div class="k"><div class="v">${wr.days}</div><div class="l">days</div></div>
         <div class="k"><div class="v">${wr.drills}</div><div class="l">drills</div></div>
         <div class="k"><div class="v">${wr.mean}</div><div class="l">avg acc</div></div>
         ${wr.delta != null ? `<div class="k"><div class="v">${wr.delta > 0 ? '▲' : wr.delta < 0 ? '▼' : '–'}${Math.abs(wr.delta)}</div><div class="l">vs last wk</div></div>` : ''}
-      </div></div>` : '';
-    const bestStreak = A.store.get('bestStreak', 0);
-    const recHtml = recCard(allAtts);   // the single "Recommended now" CTA (resume/warm-up/build/mixed)
-    const ract = recAction(allAtts);    // same action, reused by the Today button (starts the drill, no hop)
-
-    const mods = A.curr.EXERCISES.filter((e) => e.scored).map((e) => {
-      const lvl = A.curr.level(e.key), win = A.curr.window(e.key);
-      const scores = win.map((w) => (typeof w === 'object' && w ? w.s : w));   // tolerate legacy numbers
-      const recent = scores.length ? Math.round(scores.reduce((a, b) => a + b, 0) / scores.length) : null;
-      const meeting = recent != null && recent >= 85;
-      const bar = `<div class="accbar"><div class="accfill" style="width:${recent == null ? 0 : Math.min(100, recent)}%;background:${meeting ? 'var(--good)' : 'var(--accent)'}"></div><div class="accmark"></div></div>`;
-      const label = recent == null ? 'no drills yet at this level' : `recent accuracy ${recent}%${meeting ? ' — on track to level up ✓' : ' (aim ~85%)'}`;
-      return `<div class="exrow" data-focus="${e.key}"><div class="meta"><div class="nm">${esc(e.name)} <span class="lvlpill">Lv ${lvl}</span></div>
-        <div class="tiny muted" style="margin:4px 0 2px">${label}</div>${bar}</div>
-        <span class="muted">›</span></div>`;
-    }).join('');
-
-    v.innerHTML = `
-      ${recHtml}
-      ${rankCard}
-      <div class="card">
-        <div class="streak-hero">
-          <div class="ring"><svg width="84" height="84">
-            <circle cx="42" cy="42" r="34" fill="none" stroke="var(--hair)" stroke-width="8"/>
-            <circle cx="42" cy="42" r="34" fill="none" stroke="var(--accent)" stroke-width="8"
-              stroke-linecap="round" stroke-dasharray="${C}" stroke-dashoffset="${C * (1 - pct)}"/>
-          </svg><div class="num"><b>${Math.round(pct * 100)}%</b><span class="tiny muted">of goal</span></div></div>
-          <div style="flex:1">
-            <div class="row between center"><h2>Today</h2><div><span class="flame">${streak > 0 ? '🔥' : '·'}</span> <b>${streak}</b> <span class="muted small">day streak${bestStreak > streak ? ` · best ${bestStreak}` : ''}</span></div></div>
-            <div class="small muted">${fmtMin(mins)} practised · ${A.habit.todayCount()} drills · goal ${goal} min</div>
-            <button class="btn block" style="margin-top:12px" data-rec="${ract.step}" data-recex="${esc(ract.exKey)}">${mins > 0 ? 'Keep practising' : 'Start today’s practice'} ›</button>
-          </div>
-        </div>
       </div>
-
-      ${dailyCard}
-
-      <div class="card"><h2>Last 14 days</h2><div class="cal" style="margin-top:10px">${calHtml}</div></div>
-
-      <div class="card"><div class="row between center"><h2>Your progression</h2><button class="btn ghost sm" data-go="map">Map ›</button></div>
-        ${mods}</div>
-
-      ${achCard}
-      ${weekCard}
-
-      <div class="card">
-        <h2>How to progress</h2>
-        <ol class="small muted" style="margin:8px 0 0;padding-left:20px;line-height:1.7">
-          <li><b>Warm up the eye</b> (2–3 min): Perception → Judge Angle, then Judge Proportion.</li>
-          <li><b>Build accuracy</b> in order: Module 1 Lines &amp; Angles → 2 Polygons → 3 Envelopes. ~85% is the science-backed “sweet spot” for learning — hold it across a couple of days and the glance shortens and the level rises automatically.</li>
-          <li><b>Lock it in</b>: a Mixed Session a few times a week (interleaving sticks better).</li>
-          <li><b>Apply it</b>: Module 4 — Contour, Negative Space, Bargue block-in, Value, Master copy.</li>
-        </ol>
-        <div class="small muted" style="margin-top:8px">Daily rhythm: study → hide → draw from memory → guess your % → reveal → correct &amp; redraw. <b>Today’s focus</b> (above) always points you at your weakest drill.</div>
-      </div>
-      <div class="tiny muted" style="text-align:center;margin:6px 0 18px">Atelier v${esc(A.VERSION || '?')} · ${esc(A.BUILD || 'dev')}</div>`;
-    v.onclick = (e) => {
-      const rc = e.target.closest('[data-rec]'); if (rc) { doRec(rc.dataset.rec, rc.dataset.recex); return; }
-      const bd = e.target.closest('.badge'); if (bd) { toast(bd.getAttribute('title') || ''); return; }
-      const cd = e.target.closest('.cal .d'); if (cd) { toast(cd.getAttribute('title') || ''); return; }
-      const f = e.target.closest('[data-focus]'); if (f) { startExercise(f.dataset.focus); return; }
-      const g = e.target.closest('[data-go]'); if (g) ui.go(g.dataset.go);
-    };
-    // subtle celebration of anything newly earned since last Home view
-    const up = A.game.rankUp();
-    if (up) toast('Rank up: ' + up + ' 🎉');
-    else if (ach.now.length) toast('Unlocked: ' + ach.now.map((a) => a.name).join(', '));
-    else if (dp.complete && A.game.markDailyDoneOnce(dc)) toast('Daily challenge complete 🎯');
+      ${biasLine || recallLine ? `<div class="small muted">${esc([biasLine, recallLine].filter(Boolean).join(' '))}</div>` : ''}
+      ${calLine ? `<div class="insight" style="text-align:left">${esc(calLine)}</div>` : ''}
+      <button class="btn block" data-done="1" style="margin-top:12px">Start the week</button>`);
+    sheet.addEventListener('click', (e) => { if (e.target.closest('[data-done]')) closeModal(); });
+    return true;
   }
 
   /* ======================================================================
@@ -383,18 +401,21 @@
 
   async function chooseReference(exKey, def, items) {
     const isBargue = exKey === 'bargue';
-    let order = items, bestBy = {}, nextId = null;
+    // every reference drill shows per-image progress (best % + stars) — the
+    // plate-course pattern, generalised, so Module 4 has a visible ladder
+    const atts = await attempts();
+    const bestBy = {};
+    atts.forEach((a) => { if (a.type === exKey && a.refId && a.score != null && !a.repeat) bestBy[a.refId] = Math.max(bestBy[a.refId] || 0, a.score); });
+    let order = items, nextId = null;
     if (isBargue) {
-      const atts = await attempts();
-      atts.forEach((a) => { if (a.refId && a.score != null) bestBy[a.refId] = Math.max(bestBy[a.refId] || 0, a.score); });
-      const rank = (id) => { const i = BARGUE_ORDER.indexOf(id); return i < 0 ? 99 : i; };
+      const rank = (id) => { const i = A.game.PLATES.indexOf(id); return i < 0 ? 99 : i; };
       order = items.slice().sort((a, b) => rank(a.id) - rank(b.id));
-      nextId = (order.find((it) => (bestBy[it.id] || 0) < BARGUE_PASS) || order[0] || {}).id;
+      nextId = (order.find((it) => (bestBy[it.id] || 0) < A.game.PLATE_PASS) || order[0] || {}).id;
     }
     const stars = (s) => { const n = s >= 85 ? 3 : s >= 70 ? 2 : s >= 50 ? 1 : 0; return '★★★'.slice(0, n) + '☆☆☆'.slice(0, 3 - n); };
     const cells = order.map((it) => {
       const best = bestBy[it.id] || 0;
-      const meta = isBargue ? `<div class="tiny muted">${best ? 'best ' + best + '% ' : 'not started '}<span style="letter-spacing:1px;color:var(--accent)">${stars(best)}</span></div>` : '';
+      const meta = `<div class="tiny muted">${best ? 'best ' + best + '% ' : 'not started '}<span style="letter-spacing:1px;color:var(--accent)">${stars(best)}</span></div>`;
       const badge = (isBargue && it.id === nextId) ? `<span class="lvlpill" style="position:absolute;top:6px;left:6px;background:var(--accent);color:#fff;z-index:1">next</span>` : '';
       return `<div class="cell" data-ref="${esc(it.id)}" style="position:relative">${badge}
         <img src="${it.src}" alt=""><div class="cap">${esc(it.title)}</div>${meta}</div>`;
@@ -470,11 +491,12 @@
   }
 
   function showOnboarding() {
+    // three short ideas, then learn the loop BY DOING it — the estimate-before-
+    // reveal moment can't land as prose, and it takes 60 seconds to experience
     const steps = [
       { h: 'Welcome to Atelier', b: 'A pocket atelier for training the skill behind accurate drawing — your <b>visual memory</b>.<div class="insight" style="text-align:left;margin-top:10px"><b>The one rule:</b> study a shape, hide it, then draw it from memory. Never peek while drawing — the struggle is the learning.</div>' },
       { h: 'See, don’t name', b: 'Look for raw data — <b>angles, lengths, proportions</b> — not “a hand” or “a foot”. Naming makes you draw the symbol in your head instead of what’s actually there. That misperception is the real reason drawings come out wrong.' },
-      { h: 'General to specific', b: 'Block the big <b>envelope</b> in straight lines first; facet and round only once the proportions are right. Keep early lines light and correctable, and use your shoulder for longer strokes.' },
-      { h: 'Judge yourself', b: 'Before each reveal you’ll rate your own accuracy — that’s how your eye learns to catch its own errors. Mixed sessions and shorter glances feel harder on purpose; that difficulty is what builds lasting skill.<div class="muted small" style="margin-top:8px">Tip: tap <b>?</b> in any drill for how it works.</div>' }
+      { h: 'General to specific', b: 'Block the big <b>envelope</b> in straight lines first; facet and round only once the proportions are right. Keep early lines light and correctable.<div class="muted small" style="margin-top:8px">Tip: tap <b>?</b> in any drill for how it works.</div>' }
     ];
     let i = 0;
     const sheet = openModal('');
@@ -483,12 +505,20 @@
       sheet.innerHTML = `<h2>${s.h}</h2><div class="small" style="margin:10px 0 4px">${s.b}</div>
         <div class="row between center" style="margin-top:14px">
           <span class="tiny muted">${i + 1} / ${steps.length}</span>
-          <button class="btn" data-next="1">${last ? 'Start practising' : 'Next ›'}</button></div>`;
+          ${last
+            ? `<div class="row" style="gap:8px"><button class="btn ghost sm" data-skiptut="1">Just explore</button>
+               <button class="btn" data-try="1">Try it — 60 seconds ›</button></div>`
+            : `<button class="btn" data-next="1">Next ›</button>`}</div>`;
     }
     sheet.addEventListener('click', (e) => {
-      if (!e.target.closest('[data-next]')) return;
-      if (i < steps.length - 1) { i++; render(); }
-      else { A.store.set('onboarded', true); closeModal(); ui.go('practice'); }
+      if (e.target.closest('[data-next]')) { i++; render(); return; }
+      if (e.target.closest('[data-try]')) {
+        A.store.set('onboarded', true); A.store.set('tutorial', true);
+        closeModal(); startExercise('line'); return;
+      }
+      if (e.target.closest('[data-skiptut]')) {
+        A.store.set('onboarded', true); closeModal(); ui.go('practice');
+      }
     });
     render();
   }
@@ -523,22 +553,29 @@
       ? shuffledQueue(['line', 'angles', 'curve', 'polygon'], cfg.n)
       : shuffledQueue(['line', 'angles', 'curve', 'polygon', 'envelope'], cfg.n);
     session = { kind, queue, completed: 0, results: [], day: A.habit.today() };
+    // mixed sessions end on a FINISHER: the capstone drill one level up
+    // (peak-end rule — the session's last memory is a real challenge). It never
+    // feeds the level window, so difficulty stays honest.
+    if (kind === 'mixed') { queue[queue.length - 1] = 'envelope'; session.finisherIdx = queue.length - 1; }
     run = null;
     sessionStart = performance.now();
     saveSession();
-    openDrill(queue[0], null);
+    openDrill(queue[0], null, sessOpts(0));
+  }
+  function sessOpts(i) {
+    return (session && session.finisherIdx === i) ? { finisher: true } : undefined;
   }
   function resumeSession() {
     session = savedSession(); if (!session) return;
     run = null;
     sessionStart = performance.now();   // clock the current sitting
-    openDrill(session.queue[session.completed], null);
+    openDrill(session.queue[session.completed], null, sessOpts(session.completed));
   }
   // a drill counts only when actually COMPLETED (a result was produced)
   function onDrillResult(d) {
     if (!(d.def && d.result)) return;
     if (session) {
-      if (d.def.scored) { session.results.push({ type: d.exKey, score: d.result.score }); session.completed++; saveSession(); }
+      if (d.def.scored) { session.results.push({ type: d.exKey, score: d.result.score, finisher: !!d.result.finisher }); session.completed++; saveSession(); }
     } else if (run && d.def.scored) {
       run.results.push({ type: d.exKey, score: d.result.score }); run.done++;
     }
@@ -568,7 +605,8 @@
   function sessionAdvance() {
     if (session) {
       if (session.completed >= session.queue.length) { finishSession(); return; }
-      drill.startExercise(session.queue[session.completed], null); return;
+      const i = session.completed;
+      drill.startExercise(session.queue[i], null, sessOpts(i)); return;
     }
     if (run) {
       if (run.done >= run.size) { finishRun(); return; }
@@ -579,20 +617,24 @@
   // "Skip" = a fresh figure of the SAME exercise/difficulty; does NOT count as progress
   function sessionSkip() {
     if (!session) { drill.next(); return; }
-    drill.startExercise(session.queue[session.completed], null);
+    const i = session.completed;
+    drill.startExercise(session.queue[i], null, sessOpts(i));
   }
   function finishSession() {
     const res = session ? session.results : [];
     const mean = res.length ? Math.round(res.reduce((a, b) => a + b.score, 0) / res.length) : 0;
     const best = res.length ? Math.max.apply(null, res.map((r) => r.score)) : 0;
     const secs = sessionStart ? (performance.now() - sessionStart) / 1000 : 0;
-    const kind = session ? session.kind : 'mixed'; session = null; sessionStart = 0; A.store.set('session', null);
+    const kind = session ? session.kind : 'mixed';
+    const fin = res.find((r) => r.finisher);
+    session = null; sessionStart = 0; A.store.set('session', null);
     drill.stop(); $('#drill').classList.remove('on'); invalidate();
     const sheet = openModal(`<h2>${kind === 'warmup' ? 'Quick session' : 'Mixed session'} complete</h2>
       <div class="kpi" style="margin:12px 0"><div class="k"><div class="v">${res.length}</div><div class="l">drills</div></div>
         <div class="k"><div class="v">${mean}</div><div class="l">mean</div></div>
         <div class="k"><div class="v">${best}</div><div class="l">best</div></div>
         <div class="k"><div class="v">${clock(secs)}</div><div class="l">time</div></div></div>
+      ${fin ? `<div class="insight" style="text-align:left">Your finisher (${esc(exName(fin.type))}, one level up): <b>${fin.score}</b>.</div>` : ''}
       <p class="small muted">Interleaving different drills feels harder in the moment but builds more durable, transferable skill than repeating one drill.</p>
       <button class="btn block" data-done="1" style="margin-top:8px">Done</button>`);
     sheet.addEventListener('click', (e) => { if (e.target.closest('[data-done]')) { closeModal(); ui.go('home'); } });
@@ -634,12 +676,12 @@
     });
   }
 
-  function openDrill(exKey, refItem) {
+  function openDrill(exKey, refItem, opts) {
     const d = $('#drill'); d.classList.add('on');
     surface.opts.pencilOnly = A.store.get('pencilOnly', false);
     surface.opts.baseWidth = A.store.get('inkWidth', 3.2);
     // setTimeout (not rAF) so startup still runs if the first frame is throttled
-    setTimeout(() => { surface.resize(); drill.startExercise(exKey, refItem); }, 0);
+    setTimeout(() => { surface.resize(); drill.startExercise(exKey, refItem, opts); }, 0);
   }
   function closeDrill() { session = null; run = null; sessionStart = 0; drill.stop(); $('#drill').classList.remove('on'); invalidate(); ui.go(ui.view); }
 
@@ -730,7 +772,7 @@
       const after = drill.selfPaced
         ? 'When you can picture it, tap “I’ve got it” — it hides and you draw it from memory.'
         : 'It hides when the ring runs out — then draw it from memory.';
-      instr.textContent = `Memorise ${cue}. ${after}` + (!def.scored ? measuring : '');
+      instr.textContent = (drill.isFinisher ? 'Finisher — one level up! ' : '') + `Memorise ${cue}. ${after}` + (!def.scored ? measuring : '');
       timer.textContent = drill.selfPaced ? Math.floor(drill.studyElapsed || 0) + 's' : Math.ceil(drill.studyRemaining) + 's';
       const flipBtn = !def.scored && drill.ref && drill.ref.img ? `<button class="btn ghost sm" data-act="flip">Flip ⟲</button>` : '';
       const commit = drill.selfPaced
@@ -794,7 +836,15 @@
     const pbMsg = r._pb && r._pb.isNew ? '<div class="insight" style="background:var(--accent);color:#fff">★ New personal best!</div>' : '';
     const modeMsg = r.recall
       ? '<div class="insight" style="text-align:left">Retention check — recalled across a day. Scores run lower here; that struggle is the training. (Doesn’t affect your level.)</div>'
+      : r.finisher
+      ? '<div class="tiny muted" style="margin-bottom:6px">Finisher — one level up. Fully scored, but it doesn’t feed your level.</div>'
       : (r.repeat ? '<div class="tiny muted" style="margin-bottom:6px">Correction redraw — recorded, but it doesn’t count toward your level or bests.</div>' : '');
+    // interactive onboarding: name the signature moment the first time it happens
+    let tutMsg = '';
+    if (A.store.get('tutorial', false) && r.selfEstimate != null) {
+      A.store.set('tutorial', false);
+      tutMsg = `<div class="insight" style="text-align:left"><b>That’s the whole method.</b> You guessed ${r.selfEstimate}%, it was ${r.score}%. Shrinking that gap — seeing your own errors before being told — is what every drill here trains.</div>`;
+    }
     const glanceMsg = (!r.repeat && !r.recall && drill.glanceCount > 0)
       ? `<div class="tiny muted" style="margin-bottom:6px">${drill.glanceCount} glance${drill.glanceCount > 1 ? 's' : ''} used — level credit reduced by ${drill.glanceCount * 5}.</div>` : '';
     let metricRows = '';
@@ -810,7 +860,12 @@
         <div class="metricline"><span>Proportion error</span><b>${m.aspectErrPct > 0 ? '+' : ''}${m.aspectErrPct}% ${m.aspectErrPct > 0 ? '(wide)' : m.aspectErrPct < 0 ? '(tall)' : ''}</b></div>`;
     }
     const lc = r.levelChange;
-    const lvlMsg = lc && lc.changed ? `<div class="insight">${lc.dir > 0 ? '▲ Levelled up to ' + lc.level + ' — the study glance just got shorter.' : '▼ Eased to level ' + lc.level + ' to rebuild accuracy.'}</div>` : '';
+    const atCap = lc && lc.changed && lc.dir > 0 && drill.def && lc.level >= (drill.def.maxLevel || 9);
+    const lvlMsg = lc && lc.changed
+      ? (atCap
+        ? `<div class="insight" style="background:var(--warn);color:#fff">❖ Master’s mark — ${esc(drill.def.name)} held at the top level. From here, spaced reviews keep it sharp.</div>`
+        : `<div class="insight">${lc.dir > 0 ? '▲ Levelled up to ' + lc.level + ' — the study glance just got shorter.' : '▼ Eased to level ' + lc.level + ' to rebuild accuracy.'}</div>`)
+      : '';
     // self-estimate vs actual (builds the internal error-detector)
     let estRow = '';
     if (r.selfEstimate != null) {
@@ -825,7 +880,7 @@
       : `<div id="d-detail"><button class="btn ghost sm block" data-showdetail="1" style="margin-bottom:6px">Show breakdown</button></div>`;
     result.innerHTML = `<div class="card resultcard">
       <div class="scorebadge ${scoreClass(r.score)}">${r.score}</div>
-      <div class="muted small" style="margin-bottom:8px">${r.recall ? 'retention accuracy' : 'accuracy'}</div>${pbMsg}${modeMsg}${glanceMsg}
+      <div class="muted small" style="margin-bottom:8px">${r.recall ? 'retention accuracy' : 'accuracy'}</div>${pbMsg}${tutMsg}${modeMsg}${glanceMsg}
       ${estRow}${detail}${coachRow}${lvlMsg}</div>`;
     if (!r.showDetail) {
       const slot = $('#d-detail', result);
@@ -833,11 +888,21 @@
     }
     controls.innerHTML = drill.isRecall
       ? `<button class="btn ghost sm" data-act="again">Study it again</button>
-         <button class="btn" data-act="close">Done ›</button>`
+         <button class="btn" data-act="close" id="d-recnext">Done ›</button>`
       : `<button class="btn ghost sm" data-act="redraw">Redraw</button>
          <button class="btn ghost sm" data-act="again">Re-study</button>
          <button class="btn" data-act="next">${atSetEnd() ? 'See results ›' : 'Next ›'}</button>`;
+    // chain the moment: the retention check is a session OPENER — hand off to
+    // the day's next step instead of stranding the user back on the dashboard
+    if (drill.isRecall) {
+      attempts(true).then((atts) => {
+        const rec = A.game.recommend(atts);
+        const b = $('#d-recnext');
+        if (b && rec && rec.step !== 'recall') { pendingNextRec = rec; b.textContent = 'Next: ' + rec.title + ' ›'; b.dataset.act = 'recnext'; }
+      }).catch(() => {});
+    }
   }
+  let pendingNextRec = null;
 
   function revealReference(instr, controls, result) {
     if (drill.result) {  // already rated/scored → show next actions
@@ -961,6 +1026,7 @@
       else if (a === 'skipdrill') sessionSkip();
       else if (a === 'next') sessionAdvance();
       else if (a === 'close') closeDrill();
+      else if (a === 'recnext') { const rec = pendingNextRec; pendingNextRec = null; closeDrill(); if (rec) doRec(rec.step, rec.exKey); }
     };
     // Use pointerup (not click): iOS suppresses the first synthetic click right after
     // a Pencil drawing gesture on a touch-action:none canvas, which caused the
@@ -1005,34 +1071,58 @@
     const trend = A.stats.dailyTrend(all);
     const byType = Object.values(sum.byType).map((t) => ({ label: exName(t.type), value: t.mean, suffix: '' }));
 
-    // calibration insights for scored types that have data
+    // calibration insights for scored types that have data — each with a
+    // "practice this" hand-off so Stats is a springboard, not a cul-de-sac
     let calib = '';
     ['line', 'angles', 'polygon', 'envelope'].forEach((tp) => {
       const b = A.stats.bias(all, tp);
       if (!b.n) return;
       const def = A.curr.def(tp);
+      const go = `<button class="btn soft sm" data-focus="${tp}" style="margin-top:8px">Practice this ›</button>`;
       if (b.kind === 'line' || b.kind === 'angles') {
         calib += `<div class="card"><h2>${esc(def.name)} — calibration <span class="muted small">(${b.n})</span></h2>
           <div class="small muted" style="margin-top:4px">Average angle bias: <b>${b.angle.mean > 0 ? '+' : ''}${b.angle.mean}°</b></div>
           ${A.charts.biasBar(b.angle.mean, 20, ['rotate CCW', 'rotate CW'])}
           <div class="small muted">Average length bias: <b>${b.length.mean > 0 ? '+' : ''}${b.length.mean}%</b></div>
           ${A.charts.biasBar(b.length.mean, 30, ['too short', 'too long'])}
-          ${insight(b.angle.mean, b.length.mean)}</div>`;
+          ${insight(b.angle.mean, b.length.mean)}${go}</div>`;
       } else {
         calib += `<div class="card"><h2>${esc(def.name)} — calibration <span class="muted small">(${b.n})</span></h2>
           <div class="small muted" style="margin-top:4px">Average proportion bias: <b>${b.aspect.mean > 0 ? '+' : ''}${b.aspect.mean}%</b></div>
-          ${A.charts.biasBar(b.aspect.mean, 30, ['too tall', 'too wide'])}</div>`;
+          ${A.charts.biasBar(b.aspect.mean, 30, ['too tall', 'too wide'])}${go}</div>`;
       }
     });
 
+    // then vs now — visible improvement in your own strokes
+    const cmpTypes = ['line', 'angles', 'curve', 'polygon', 'envelope'].filter((t) => A.history.compare(all, t));
+    const progressCard = cmpTypes.length ? `<div class="card"><h2>Then vs now</h2>
+      <div class="small muted">your earliest attempts beside your latest — proof the practice works</div>
+      <div class="row wrap" style="margin-top:10px">${cmpTypes.map((t) => `<button class="btn soft sm" data-cmp="${t}">${esc(exName(t))} ›</button>`).join('')}</div></div>` : '';
+
+    // overnight memory — the retention checks deserve their own scoreboard
+    const recalls = all.filter((a) => a.recall);
+    let retCard = '';
+    if (recalls.length) {
+      const byDay = {};
+      recalls.forEach((a) => { (byDay[a.day] || (byDay[a.day] = [])).push(a.score); });
+      const trend = Object.keys(byDay).sort().map((d) => ({ day: d, score: Math.round(byDay[d].reduce((x, y) => x + y, 0) / byDay[d].length), n: byDay[d].length }));
+      const rMean = Math.round(recalls.reduce((s, a) => s + a.score, 0) / recalls.length);
+      const firstLook = all.filter((a) => a.scored && !a.repeat && !a.recall && !PERC_LABELS[a.type]);
+      const fMean = firstLook.length ? Math.round(firstLook.reduce((s, a) => s + a.score, 0) / firstLook.length) : null;
+      retCard = `<div class="card"><h2>Overnight memory <span class="muted small">(${recalls.length})</span></h2>
+        <div class="small muted">retention checks — figures recalled across a day. Mean <b>${rMean}</b>${fMean != null ? ` vs ${fMean} same-day` : ''}; that gap closing is long-term memory forming.</div>
+        ${A.charts.line(trend)}</div>`;
+    }
+
     const sva = A.stats.studyVsAccuracy(all);
-    const pa = all.filter((a) => a.type === 'perc-angle' && a.metrics && a.metrics.angleErrDeg != null);
+    const pa = all.filter((a) => a.type === 'perc-angle' && a.metrics && a.metrics.angleErrDeg != null).slice(-A.stats.BIAS_WINDOW);
     let percCard = '';
     if (pa.length) {
       const m = +(pa.reduce((s, a) => s + a.metrics.angleErrDeg, 0) / pa.length).toFixed(1);
       percCard = `<div class="card"><h2>Perceive: Angle — bias <span class="muted small">(${pa.length})</span></h2>
         <div class="small muted">pure perception, no drawing. Average signed error ${m > 0 ? '+' : ''}${m}°</div>
-        ${A.charts.biasBar(m, 20, ['under-rotate', 'over-rotate'])}</div>`;
+        ${A.charts.biasBar(m, 20, ['under-rotate', 'over-rotate'])}
+        <button class="btn soft sm" data-perc="angle" style="margin-top:8px">Warm up ›</button></div>`;
     }
     const sa = A.stats.selfAwareness(all);
     const calLine = sa && sa.bias != null ? A.coach.calibration(sa.bias) : '';
@@ -1051,6 +1141,8 @@
           <div class="k"><div class="v">🔥 ${A.habit.streak()}</div><div class="l">streak</div></div>
         </div></div>
       <div class="card"><h2>Accuracy over time</h2><div class="small muted">daily mean across all drills</div>${A.charts.line(trend)}</div>
+      ${progressCard}
+      ${retCard}
       <div class="card"><h2>By exercise</h2>${A.charts.bars(byType)}</div>
       ${saCard}
       ${percCard}
@@ -1058,6 +1150,37 @@
       <div class="card"><h2>Study time vs accuracy</h2>
         <div class="small muted">each dot is one scored drill — does a longer glance actually help you?</div>
         ${A.charts.scatter(sva)}</div>`;
+    v.onclick = (e) => {
+      const c = e.target.closest('[data-cmp]'); if (c) { showCompare(all, c.dataset.cmp); return; }
+      const f = e.target.closest('[data-focus]'); if (f) { startExercise(f.dataset.focus); return; }
+      const p = e.target.closest('[data-perc]'); if (p) A.Perceive.start(p.dataset.perc);
+    };
+  }
+
+  // "then vs now" modal: two replays side by side + the deltas that matter
+  function showCompare(all, type) {
+    const c = A.history.compare(all, type); if (!c) return;
+    const fmtBias = (b) => b ? `${b.val > 0 ? '+' : ''}${b.val}${b.unit}` : '—';
+    const sheet = openModal(`<h2>${esc(exName(type))} — then vs now</h2>
+      <div class="small muted">${c.spanDays} days apart · your first five vs your latest five</div>
+      <div class="cmpgrid">
+        <div><div class="tiny muted" style="text-align:center;margin-bottom:4px">then</div><canvas class="replaycv" id="cmp-a"></canvas></div>
+        <div><div class="tiny muted" style="text-align:center;margin-bottom:4px">now</div><canvas class="replaycv" id="cmp-b"></canvas></div>
+      </div>
+      <div class="metricline"><span>Mean accuracy</span><b>${c.early.mean} → ${c.late.mean}</b></div>
+      ${c.early.bias && c.late.bias ? `<div class="metricline"><span>${esc(c.late.bias.label)}</span><b>${fmtBias(c.early.bias)} → ${fmtBias(c.late.bias)}</b></div>` : ''}
+      <div class="metricline"><span>Study glance</span><b>${c.early.study}s → ${c.late.study}s</b></div>
+      ${c.early.estErr != null && c.late.estErr != null ? `<div class="metricline"><span>Self-estimate gap</span><b>±${c.early.estErr} → ±${c.late.estErr}</b></div>` : ''}
+      <button class="btn block" data-done="1" style="margin-top:12px">Close</button>`);
+    const draw = (sel, att) => {
+      const cv = $(sel, sheet); if (!cv) return;
+      const dpr = window.devicePixelRatio || 1;
+      const s = Math.round((cv.clientWidth || 170) * dpr);
+      cv.width = s; cv.height = s;
+      A.history.drawReplay(cv.getContext('2d'), att, s, 1);
+    };
+    draw('#cmp-a', c.early.att); draw('#cmp-b', c.late.att);
+    sheet.addEventListener('click', (e) => { if (e.target.closest('[data-done]')) closeModal(); });
   }
   function insight(angle, len) {
     const parts = [];
@@ -1180,15 +1303,24 @@
       ${nodes}<circle cx="${mX.toFixed(1)}" cy="${mY.toFixed(1)}" r="4" fill="var(--ink)"/></svg>`;
   }
 
-  function renderMap(v) {
-    const star = (n) => Array.from({ length: 5 }, (_, i) => `<span style="color:${i < n ? 'var(--accent)' : 'var(--line)'}">★</span>`).join('');
+  async function renderMap(v) {
+    const allAtts = await attempts();
+    // gold state: a drill held at cap — mastery is UPHELD, not just reached
+    const star = (n, gold) => Array.from({ length: 5 }, (_, i) => `<span style="color:${i < n ? (gold ? 'var(--warn)' : 'var(--accent)') : 'var(--line)'}">★</span>`).join('');
     const sections = A.curr.modules.map((m) => {
       const exs = A.curr.EXERCISES.filter((e) => e.module === m.n);
       const nodes = exs.map((e) => {
         if (e.scored) {
           const lvl = A.curr.level(e.key);
-          return `<div class="mapnode" data-focus="${e.key}"><div class="mn-name">${esc(e.name)}</div>
-            <div class="mn-stars">${star(A.game.starTier(lvl))} <span class="tiny muted">Lv ${lvl}</span></div></div>`;
+          const gold = lvl >= (e.maxLevel || 9);
+          return `<div class="mapnode" data-focus="${e.key}"><div class="mn-name">${esc(e.name)}${gold ? ' <span class="lvlpill" style="background:var(--warn);color:#fff">held at cap</span>' : ''}</div>
+            <div class="mn-stars">${star(A.game.starTier(lvl), gold)} <span class="tiny muted">Lv ${lvl}</span></div></div>`;
+        }
+        if (e.key === 'bargue') {
+          const pb = A.store.get('platesBest', {});
+          const stars = A.game.PLATES.map((id) => (pb[id] || 0) >= A.game.PLATE_PASS ? '★' : '☆').join('');
+          return `<div class="mapnode" data-ex="${e.key}"><div class="mn-name">${esc(e.name)} <span class="tag self">plate course</span></div>
+            <div class="mn-stars"><span style="color:var(--accent);letter-spacing:2px">${stars}</span> <span class="tiny muted">${A.game.platesPassed()}/4 plates passed</span></div></div>`;
         }
         return `<div class="mapnode" data-ex="${e.key}"><div class="mn-name">${esc(e.name)} <span class="tag self">self-check</span></div>
           <div class="tiny muted">reference drill</div></div>`;
@@ -1199,9 +1331,36 @@
     const rk = A.game.rank();
     const desc = ['finding your eye', 'lines & angles', 'shapes & proportion', 'real subjects & plates', 'drawing from memory'][rk.index] || '';
     const journeyCard = `<div class="card"><h2>Your journey</h2>${journeySVG(rk)}
-      <div class="small muted" style="text-align:center;margin-top:2px">You are a <b>${esc(rk.name)}</b> — ${esc(desc)}. ${rk.next ? `${rk.nextAt - rk.points} pts to ${esc(rk.next)}.` : 'Top rank reached.'}</div></div>`;
-    v.innerHTML = `${journeyCard}<div class="banner">Each scored drill earns stars as its level rises; the real-subject drills unlock as your basics get solid.</div>${sections}`;
+      <div class="small muted" style="text-align:center;margin-top:2px">You are a <b>${esc(rk.name)}</b> — ${esc(desc)}. ${rk.next ? `${rk.nextAt - rk.points} pts to ${esc(rk.next)} (${rk.points} pts).` : ''}</div></div>`;
+    // post-Master: reframe from climbing to UPHOLDING — skills decay on the
+    // spaced schedule; the master's practice is keeping them from decaying
+    let masterCard = '';
+    if (!rk.next) {
+      const due = A.curr.dueDrills(A.habit.today()).concat(A.curr.dueRefs(A.habit.today()));
+      const capped = A.curr.EXERCISES.filter((e) => e.scored && A.curr.level(e.key) >= (e.maxLevel || 9)).length;
+      const sa = A.stats.selfAwareness(allAtts);
+      masterCard = `<div class="card"><h2>Master’s practice</h2>
+        <div class="small muted" style="margin-top:4px">The rank is earned; the skill is upheld. Reviews keep it from decaying.</div>
+        <div class="kpi" style="margin-top:10px">
+          <div class="k"><div class="v">${capped}/5</div><div class="l">held at cap</div></div>
+          <div class="k"><div class="v">${due.length}</div><div class="l">due for review</div></div>
+          <div class="k"><div class="v">${A.game.platesPassed()}/4</div><div class="l">plates passed</div></div>
+          ${sa ? `<div class="k"><div class="v">±${sa.meanGap}</div><div class="l">self-read gap</div></div>` : ''}
+        </div></div>`;
+    }
+    // achievements live on the journey, not the daily dashboard
+    const ach = A.game.check(allAtts);
+    const earnedCount = Object.keys(ach.earned).length;
+    const badges = A.game.ACH.map((a) => {
+      const got = !!ach.earned[a.id];
+      return `<div class="badge ${got ? '' : 'locked'}" title="${esc(a.desc)}"><div class="bic">${a.icon}</div><div class="bnm">${esc(a.name)}</div></div>`;
+    }).join('');
+    const achCard = `<div class="card"><div class="row between center"><h2>Achievements</h2>
+        <span class="muted small">${earnedCount}/${A.game.ACH.length}</span></div>
+      <div class="badges">${badges}</div></div>`;
+    v.innerHTML = `${journeyCard}${masterCard}<div class="banner">Each scored drill earns stars as its level rises; the real-subject drills unlock as your basics get solid.</div>${sections}${achCard}`;
     v.onclick = (e) => {
+      const bd = e.target.closest('.badge'); if (bd) { toast(bd.getAttribute('title') || ''); return; }
       const f = e.target.closest('[data-focus]'); if (f) { startExercise(f.dataset.focus); return; }
       const x = e.target.closest('[data-ex]'); if (x) startExercise(x.dataset.ex);
     };
@@ -1240,7 +1399,9 @@
         ${profRows}
         <button class="btn soft block" id="addprofile" style="margin-top:10px">+ Add user</button></div>
       <div class="card"><h2>Practice</h2>
-        <div class="setrow"><div><div>Daily goal</div><div class="small muted">minutes per day for your streak</div></div>
+        <div class="setrow"><div><div>Daily goal</div><div class="small muted">what keeps the streak alive</div></div>
+          <button class="btn ghost sm" id="goalmode">${A.habit.goalMode() === 'plan' ? 'Complete the plan' : 'Minutes practised'}</button></div>
+        <div class="setrow"><div><div>Minutes target</div><div class="small muted">${A.habit.goalMode() === 'plan' ? 'also counts — either one keeps the streak' : 'minutes per day for your streak'}</div></div>
           <div class="stepper"><button data-goal="-1">−</button><b id="goalv">${goal}</b><button data-goal="1">+</button></div></div>
         <div class="setrow"><div><div>Apple Pencil only</div><div class="small muted">ignore finger/palm while drawing</div></div>
           <div class="switch ${pencilOnly ? 'on' : ''}" id="sw-pencil" role="switch" aria-checked="${pencilOnly}" tabindex="0" aria-label="Apple Pencil only"><div class="knob"></div></div></div>
@@ -1276,6 +1437,7 @@
         async () => { await A.store.deleteProfile(b.dataset.pdel); renderSettings(v); }, true);
     });
     $('#addprofile', v).onclick = () => promptModal('Name for the new user?', '', (n) => switchProfile(A.store.addProfile(n)));
+    $('#goalmode', v).onclick = () => { A.habit.setGoalMode(A.habit.goalMode() === 'plan' ? 'minutes' : 'plan'); renderSettings(v); };
     $$('[data-goal]', v).forEach((b) => b.onclick = () => { A.habit.setGoal(Math.max(5, Math.min(120, goal + (+b.dataset.goal) * 5))); renderSettings(v); });
     $$('[data-ink]', v).forEach((b) => b.onclick = () => { A.store.set('inkWidth', Math.max(1.2, Math.min(6, inkW + (+b.dataset.ink)))); surface.opts.baseWidth = A.store.get('inkWidth', 3.2); renderSettings(v); });
     $('#sw-pencil', v).onclick = () => { A.store.set('pencilOnly', !pencilOnly); surface.opts.pencilOnly = !pencilOnly; renderSettings(v); };
@@ -1294,7 +1456,8 @@
       confirmModal('Reset progress?', 'All levels, rank, achievements, personal bests and streak reset. Your saved drills stay.', 'Reset', () => {
         // store.remove is profile-aware — a hand-built 'atelier:' prefix would
         // wipe the DEFAULT profile's keys no matter who is active
-        ['curriculum', 'percLevel', 'percWin', 'ach', 'pb', 'bestStreak', 'lastRank', 'daily', 'dailyDone', 'dailyCount', 'session']
+        ['curriculum', 'percLevel', 'percWin', 'ach', 'pb', 'bestStreak', 'lastRank', 'daily', 'dailyDone', 'dailyCount',
+         'session', 'planDays', 'planPick', 'platesBest', 'weekSeen', 'lastWarmKind']
           .forEach((k) => A.store.remove(k));
         A.store.set('habit', { days: {}, goalMin: goal });
         toast('Progress reset'); renderSettings(v);

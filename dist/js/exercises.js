@@ -52,10 +52,15 @@
 
   Drill.prototype._emit = function () { if (this.onState) this.onState(this); };
 
-  Drill.prototype.startExercise = function (exKey, refItem) {
+  Drill.prototype.startExercise = function (exKey, refItem, opts) {
+    opts = opts || {};
     this.exKey = exKey;
     this.def = A.curr.def(exKey);
     this.level = A.curr.level(exKey);
+    // session FINISHER: one level up as a peak-end challenge. Excluded from
+    // level promotion (the boost would poison the window) but fully scored.
+    this.isFinisher = !!opts.finisher;
+    if (this.isFinisher) this.level = Math.min(this.def.maxLevel || 9, this.level + 1);
     this.result = null; this.pending = null; this.sessionIndex = 0;
     this.isRepeat = false; this.isRecall = false;
     this.glanceCount = 0; this.glanceCap = 3;
@@ -304,14 +309,14 @@
     // Manual glances cost level credit: the score stands, but each peek shaves
     // the value the promotion window sees (memory training isn't defeated quietly).
     let adv = { changed: false, level: this.level };
-    if (!this.isRepeat && !this.isRecall) {
+    if (!this.isRepeat && !this.isRecall && !this.isFinisher) {
       const credit = Math.max(0, r.score - 5 * (this.glanceCount || 0));
       adv = A.curr.recordScore(this.exKey, credit, dayKey());
       this.level = adv.level;
     }
     this.result = { score: r.score, selfRated: false, metrics: r.metrics,
                     selfEstimate: est, estErr, coaching, showDetail, levelChange: adv,
-                    repeat: this.isRepeat, recall: this.isRecall };
+                    repeat: this.isRepeat, recall: this.isRecall, finisher: this.isFinisher };
     this._record(r.score, false, r.metrics, est);
     this.phase = 'reveal';
     this.surface.locked = false;
@@ -352,7 +357,7 @@
       level: this.level, studySec: +this.studySec.toFixed(1), drawSec: +this.drawSec.toFixed(1),
       score: score, selfRated: !!selfRated, metrics: metrics || {},
       glances: this.glanceCount || 0,
-      repeat: !!this.isRepeat, recall: !!this.isRecall,
+      repeat: !!this.isRepeat, recall: !!this.isRecall, finisher: !!this.isFinisher,
       selfEstimate: (selfEstimate == null ? null : selfEstimate),
       estErr: (selfEstimate == null ? null : Math.abs(selfEstimate - score)),
       estBias: (selfEstimate == null ? null : selfEstimate - score),   // signed: + = overconfident
@@ -361,6 +366,8 @@
     };
     A.store.addAttempt(att);
     A.habit.touch((this.studySec || 0) + (this.drawSec || 0));
+    if (!this.def.scored && !this.isRepeat) A.curr.touchRef(this.exKey, att.day);   // spaced review for plates
+    if (this.exKey === 'bargue' && att.refId) A.game.notePlate(att.refId, score);   // plate-course best
     this.lastAttempt = att;
   };
 
@@ -392,7 +399,7 @@
   // brand-new target, same exercise
   Drill.prototype.next = function () {
     this.result = null;
-    this.isRepeat = false; this.isRecall = false;
+    this.isRepeat = false; this.isRecall = false; this.isFinisher = false;
     this.level = A.curr.level(this.exKey);
     this.surface.reset();
     this._newTargetGeom();
@@ -409,7 +416,7 @@
     this.def = A.curr.def(exKey);
     this.level = A.curr.level(exKey);
     this.result = null; this.pending = null; this.sessionIndex = 0;
-    this.isRepeat = false; this.isRecall = true;
+    this.isRepeat = false; this.isRecall = true; this.isFinisher = false;
     this.glanceCount = 0; this.glanceCap = 0;      // no peeking — it's a test
     this.avgLook = 0;
     this.ref = null;

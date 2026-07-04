@@ -201,6 +201,18 @@
       <div class="row" style="margin-top:8px">${again}${done}</div></div>`;
     el.querySelector('#p-again').onclick = () => newRound(st.kind);
     el.querySelector('#p-done').onclick = close;
+    // the warm-up is the day's OPENER — once warmed, hand off to the next step
+    // of the plan instead of stranding the user back on a dashboard
+    if (warmed && A.ui && A.ui.doRec && A.game && A.store.allAttempts) {
+      A.store.allAttempts().then((atts) => {
+        const rec = A.game.recommend(atts);
+        const btn = el.querySelector('#p-done');
+        if (btn && rec && rec.step !== 'warmup') {
+          btn.textContent = 'Next: ' + rec.title + ' ›';
+          btn.onclick = () => { close(); A.ui.doRec(rec.step, rec.exKey); };
+        }
+      }).catch(() => {});
+    }
   }
 
   A.Perceive = { start };

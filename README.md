@@ -21,22 +21,23 @@ python build/make_refs.py    # only if you change bundled images
 python build/make_icons.py   # only if you change the icon
 node   build/build.js        # regenerates dist/ AND Atelier.html
 ```
-`build.js` is the one build step: it refreshes `dist/` from `src/` and stamps
-the service-worker cache name + `A.BUILD` from the clock, so every deploy
-automatically invalidates the previous offline cache. Never edit `dist/` by
-hand. `src/tests.html` is the self-test page (open it in a browser).
+`build.js` is the one build step: it refreshes `dist/` from `src/`, stamps
+`A.VERSION` (from `build/version.json`) and the service-worker cache name +
+`A.BUILD` from the clock — so every deploy automatically invalidates the
+previous offline cache — and fails if the module load-order lists drift.
+Never edit `dist/` by hand.
+
+Tests: `node --test test/*.test.js` (leveling gate, spaced scheduler, streak,
+recommendation engine, plan, scoring, backup guards) — run by GitHub Actions
+on every push. `src/tests.html` is the in-browser/on-iPad smoke page.
 
 ## Put it on the iPad (offline, no App Store)
 
-1. This folder is in Dropbox — open **Dropbox / Files** on the iPad and find
-   `Atelier.html` (tap *Make Available Offline* in Dropbox so it's stored locally).
-2. Open it in **Safari**.
-3. Tap the **Share** button → **Add to Home Screen**.
-4. Launch it from the home-screen icon. It now runs full-screen and works with
-   no internet.
-
-> The first open needs the file present on the device; after "Add to Home
-> Screen" it runs offline like a native app.
+The recommended route is hosting `dist/` (Netlify/GitHub Pages) and "Add to
+Home Screen" from Safari — see **DEPLOY.md** for the 3-minute walkthrough.
+The single-file `Atelier.html` route also works: open it in Safari from
+Files/Dropbox → Share → **Add to Home Screen** → it runs full-screen and
+offline like a native app.
 
 ## Back up your progress
 

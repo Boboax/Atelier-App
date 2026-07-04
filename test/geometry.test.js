@@ -1,0 +1,76 @@
+'use strict';
+const { test } = require('node:test');
+const assert = require('node:assert');
+const { freshEnv } = require('./helpers');
+
+const load = () => freshEnv(['js/geometry.js', 'js/generators.js']).A;
+const sq = [[0.3, 0.3], [0.7, 0.3], [0.7, 0.7], [0.3, 0.7]];
+
+test('identical shapes score 100; degenerate input scores 0', () => {
+  const g = load().geom;
+  assert.equal(g.scoreShape(sq, sq.map((p) => p.slice())).score, 100);
+  assert.equal(g.scoreLine([[0.2, 0.5], [0.8, 0.5]], [[0.5, 0.5], [0.5, 0.5]]).score, 0);
+  assert.equal(g.scoreCurve([[0, 0], [1, 1]], [[0.5, 0.5], [0.5, 0.5]]).score, 0);
+  assert.equal(g.scoreShape(sq, [[0.5, 0.5], [0.5, 0.5], [0.501, 0.5]]).score, 0);
+});
+
+test('scale/translation invariance; aspect error signed', () => {
+  const g = load().geom;
+  const half = sq.map((p) => [0.25 + (p[0] - 0.5) * 0.5, 0.25 + (p[1] - 0.5) * 0.5]);
+  assert.ok(g.scoreShape(sq, half).score >= 95);
+  const wide = [[0.1, 0.4], [0.9, 0.4], [0.9, 0.6], [0.1, 0.6]];
+  const w = g.scoreShape(sq, wide);
+  assert.ok(w.score < 70);
+  assert.ok(w.aspectErrPct > 0, '+ = too wide');
+});
+
+test('angle relationships: direction-agnostic, relational, missing-line penalty', () => {
+  const g = load().geom;
+  const V = [0.5, 0.6];
+  const mk = (deg, len) => [V, [V[0] + Math.cos(deg * Math.PI / 180) * len, V[1] + Math.sin(deg * Math.PI / 180) * len]];
+  const T = [mk(-150, 0.4), mk(-90, 0.5), mk(-30, 0.35)];
+  assert.equal(g.scoreAngles(T, T.map((l) => [l[0].slice(), l[1].slice()])).score, 100);
+  assert.equal(g.scoreAngles(T, T.map((l) => [l[1].slice(), l[0].slice()])).score, 100, 'reversed strokes');
+  const rot = g.scoreAngles(T, [mk(-140, 0.4), mk(-80, 0.5), mk(-20, 0.35)]);
+  assert.ok(Math.abs(rot.metrics.relAngleErrDeg) < 0.5, 'rigid rotation → gaps unchanged');
+  const gap = g.scoreAngles(T, [mk(-150, 0.4), mk(-70, 0.5), mk(-30, 0.35)]);
+  assert.ok(rot.score > gap.score, 'rigid rotation beats a broken gap');
+  assert.ok(g.scoreAngles(T, [T[0], T[1]]).score < 100, 'missing line penalised');
+});
+
+test('line scoring: signed errors fold correctly', () => {
+  const g = load().geom;
+  const r = g.scoreLine([[0.2, 0.5], [0.8, 0.5]], [[0.2, 0.5], [0.78, 0.6]]);
+  assert.ok(r.angleErr > 0, 'downward tilt = clockwise = positive');
+  assert.equal(g.angDiff(359, 1), -2);
+});
+
+test('rdp: 10x+ decimation, endpoints kept', () => {
+  const g = load().geom;
+  const dense = Array.from({ length: 400 }, (_, i) => [i / 399, 0.5 + Math.sin(i / 399 * 4) * 0.2]);
+  const slim = g.rdp(dense, 0.002);
+  assert.ok(slim.length * 10 <= dense.length);
+  assert.deepEqual(slim[0], dense[0]);
+  assert.deepEqual(slim[slim.length - 1], dense[dense.length - 1]);
+});
+
+test('generators: no NaN, polygons valid, scores in range (fuzz 2000)', () => {
+  const A = load();
+  const g = A.geom, gen = A.gen;
+  const noisy = (ps) => ps.map((p) => [p[0] + (Math.random() - 0.5) * 0.05, p[1] + (Math.random() - 0.5) * 0.05]);
+  let bad = 0;
+  for (let i = 0; i < 2000; i++) {
+    const kind = ['line', 'angles', 'curve', 'polygon', 'envelope'][i % 5];
+    const t = gen.make(kind, 1 + (i % 9));
+    const pts = t.polygon || t.polyline || t.lines.flat();
+    if (pts.some((p) => !isFinite(p[0]) || !isFinite(p[1]))) bad++;
+    if (t.polygon && t.polygon.length < 3) bad++;
+    let s;
+    if (kind === 'line') s = g.scoreLine(t.lines[0], noisy(t.lines[0])).score;
+    else if (kind === 'angles') s = g.scoreAngles(t.lines, t.lines.map(noisy)).score;
+    else if (kind === 'curve') s = g.scoreCurve(t.polyline, noisy(t.polyline)).score;
+    else s = g.scoreShape(t.polygon, noisy(t.polygon)).score;
+    if (!isFinite(s) || s < 0 || s > 100) bad++;
+  }
+  assert.equal(bad, 0);
+});

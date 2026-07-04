@@ -51,6 +51,39 @@
       return `<svg viewBox="0 0 ${S} ${S}" class="thumb"><rect width="${S}" height="${S}" fill="#fff"/>${g}</svg>`;
     },
 
+    // "Then vs now": earliest 5 vs latest 5 genuine attempts of a drill type,
+    // once there are >=10 spanning >=14 days. Visible improvement in one's own
+    // strokes is the strongest competence signal a drawing app can produce
+    // (OPTIMAL: enhanced expectancies) — and every attempt already stores what
+    // we need. Returns null until there's enough history.
+    compare(attempts, type) {
+      const f = (attempts || [])
+        .filter((a) => a.type === type && a.scored && !a.repeat && !a.recall &&
+                       a.strokes && a.strokes.length && a.target)
+        .sort((a, b) => a.ts - b.ts);
+      if (f.length < 10) return null;
+      const spanDays = (f[f.length - 1].ts - f[0].ts) / 864e5;
+      if (spanDays < 14) return null;
+      const median = (arr) => arr.slice().sort((a, b) => a.score - b.score)[Math.floor(arr.length / 2)];
+      const avg = (xs) => xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : null;
+      const biasOf = (arr) => {
+        const ang = arr.map((a) => a.metrics && (a.metrics.angleErrDeg != null ? a.metrics.angleErrDeg : a.metrics.meanAngleErrDeg)).filter((v) => v != null);
+        if (ang.length) return { label: 'angle bias', val: +avg(ang).toFixed(1), unit: '°' };
+        const asp = arr.map((a) => a.metrics && a.metrics.aspectErrPct).filter((v) => v != null);
+        if (asp.length) return { label: 'proportion bias', val: +avg(asp).toFixed(1), unit: '%' };
+        return null;
+      };
+      const stat = (arr) => ({
+        att: median(arr),
+        mean: Math.round(avg(arr.map((a) => a.score))),
+        study: +avg(arr.map((a) => a.studySec || 0)).toFixed(1),
+        estErr: (v => v == null ? null : +v.toFixed(1))(avg(arr.map((a) => a.estErr).filter((v) => v != null))),
+        bias: biasOf(arr)
+      });
+      return { type, n: f.length, spanDays: Math.round(spanDays),
+               early: stat(f.slice(0, 5)), late: stat(f.slice(-5)) };
+    },
+
     // animated replay onto a canvas 2d context (square). progress 0..1.
     drawReplay(ctx, att, sizePx, progress) {
       const S = sizePx;
