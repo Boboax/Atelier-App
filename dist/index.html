@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no, maximum-scale=1">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Atelier">
+  <meta name="theme-color" content="#f6f3ec" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#211d18" media="(prefers-color-scheme: dark)">
+  <meta name="robots" content="noindex, nofollow">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" type="image/svg+xml" href="assets/favicon.svg">
+  <link rel="alternate icon" type="image/png" href="assets/icon-192.png">
+  <link rel="apple-touch-icon" href="assets/apple-touch-icon.png">
+  <link rel="stylesheet" href="styles.css">
+  <title>Atelier — memory drawing trainer</title>
+</head>
+<body>
+  <div id="boot" style="min-height:60vh;display:flex;align-items:center;justify-content:center;font-family:var(--serif,Georgia,serif);font-size:26px;letter-spacing:.5px;color:var(--muted,#6e6759)">Atelier<span style="color:var(--accent,#b4532a)">.</span></div>
+  <!-- data -->
+  <script src="data/refs.js"></script>
+  <!-- engine (keep in step with JS_ORDER in build/build.js) -->
+  <script src="js/geometry.js"></script>
+  <script src="js/storage.js"></script>
+  <script src="js/generators.js"></script>
+  <script src="js/canvas.js"></script>
+  <script src="js/curriculum.js"></script>
+  <script src="js/coach.js"></script>
+  <script src="js/gamify.js"></script>
+  <script src="js/exercises.js"></script>
+  <script src="js/perceive.js"></script>
+  <script src="js/library.js"></script>
+  <script src="js/stats.js"></script>
+  <script src="js/history.js"></script>
+  <script src="js/imgscore.js"></script>
+  <!-- views -->
+  <script src="js/ui.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>

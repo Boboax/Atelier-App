@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Atelier — self tests</title>
+<style>
+  body{font-family:-apple-system,Segoe UI,Roboto,sans-serif;margin:0;background:#f6f3ec;color:#23201b}
+  header{padding:16px 20px;border-bottom:1px solid #d9d1c0}
+  h1{margin:0;font-size:20px;font-family:Georgia,serif}
+  #summary{font-size:15px;margin-top:6px}
+  .ok{color:#4e8a5b}.bad{color:#b4453a;font-weight:700}
+  #list{padding:8px 20px 60px}
+  .t{padding:7px 0;border-bottom:1px solid #eadfce;font-size:14px;display:flex;gap:10px}
+  .t .mark{width:18px}
+  .t .msg{color:#8a8276}
+  button{font:inherit;padding:10px 16px;border-radius:10px;border:0;background:#b4532a;color:#fff;cursor:pointer;margin-top:8px}
+</style>
+</head>
+<body>
+<header><h1>Atelier — self tests</h1><div id="summary">running…</div>
+  <button onclick="location.reload()">Re-run</button>
+  <button id="fuzzbtn">Run fuzz ×4000</button>
+</header>
+<div id="list"></div>
+
+<script src="js/geometry.js"></script>
+<script src="js/generators.js"></script>
+<script src="js/coach.js"></script>
+<script src="js/stats.js"></script>
+<script src="js/history.js"></script>
+<script>
+(function(){
+  const A=window.A, g=A.geom, gen=A.gen;
+  const results=[];
+  function ok(name,cond,msg){ results.push({name,pass:!!cond,msg:msg||''}); }
+  function approx(a,b,tol){ return Math.abs(a-b)<=(tol==null?1:tol); }
+  const sq=[[0.3,0.3],[0.7,0.3],[0.7,0.7],[0.3,0.7]];
+  const tri=[[0.3,0.3],[0.7,0.35],[0.5,0.7]];
+
+  try {
+    // --- shape scoring invariants ---
+    ok('identical square → 100', g.scoreShape(sq, sq.map(p=>p.slice())).score===100);
+    ok('identical triangle → 100', g.scoreShape(tri, tri.map(p=>p.slice())).score===100);
+    const half=sq.map(p=>[0.25+(p[0]-0.5)*0.5,0.25+(p[1]-0.5)*0.5]);
+    ok('scale-invariant (½ size) ≥95', g.scoreShape(sq, half).score>=95, 'got '+g.scoreShape(sq,half).score);
+    const shifted=sq.map(p=>[p[0]+0.15,p[1]-0.1]);
+    ok('translation-invariant ≥95', g.scoreShape(sq, shifted).score>=95, 'got '+g.scoreShape(sq,shifted).score);
+    const wide=[[0.1,0.4],[0.9,0.4],[0.9,0.6],[0.1,0.6]];
+    const w=g.scoreShape(sq,wide); ok('wrong aspect penalised <70', w.score<70, 'got '+w.score);
+    ok('aspect error sign (+ = wide)', w.aspectErrPct>0, 'got '+w.aspectErrPct);
+    ok('shapeIoU(square,square)=1', approx(g.shapeIoU(sq,sq),1,0.001));
+
+    // --- line scoring ---
+    const tl=[[0.2,0.5],[0.8,0.5]];
+    ok('identical line → 100', g.scoreLine(tl,[[0.2,0.5],[0.8,0.5]]).score===100);
+    const r=g.scoreLine(tl,[[0.2,0.5],[0.78,0.6]]); // tilted down-right (CW on screen)
+    ok('CW tilt → positive angleErr', r.angleErr>0, 'got '+r.angleErr);
+    const shortL=g.scoreLine(tl,[[0.35,0.5],[0.65,0.5]]);
+    ok('half length → ~ -50% lengthErr', approx(shortL.lengthErrPct,-50,3), 'got '+shortL.lengthErrPct);
+    // bestFitSegment of a clean diagonal
+    const seg=g.bestFitSegment([[0,0],[0.25,0.25],[0.5,0.5],[0.75,0.75],[1,1]]);
+    const ang=Math.atan2(seg[1][1]-seg[0][1],seg[1][0]-seg[0][0])*180/Math.PI;
+    ok('bestFit diagonal ≈45°', approx(Math.abs(ang),45,2), 'got '+ang.toFixed(1));
+
+    // --- degenerate input must score 0 (a tap is not a drawing) ---
+    ok('dot on line → 0', g.scoreLine(tl,[[0.5,0.5],[0.5,0.5]]).score===0);
+    ok('dot on curve → 0', g.scoreCurve([[0,0],[1,1]],[[0.5,0.5],[0.5,0.5]]).score===0);
+    ok('dot on shape → 0', g.scoreShape(sq,[[0.5,0.5],[0.5,0.5],[0.501,0.5]]).score===0);
+
+    // --- curve scoring ---
+    const cvT=[[0.2,0.6],[0.35,0.4],[0.5,0.35],[0.65,0.4],[0.8,0.6]];
+    ok('identical curve → 100', g.scoreCurve(cvT,cvT.map(p=>p.slice())).score===100);
+    ok('shifted curve invariant ≥95', g.scoreCurve(cvT,cvT.map(p=>[p[0]+0.1,p[1]+0.05])).score>=95);
+
+    // --- angle-relationship scoring (relational) ---
+    const V=[0.5,0.6], mk=(deg,len)=>[V,[V[0]+Math.cos(deg*Math.PI/180)*len,V[1]+Math.sin(deg*Math.PI/180)*len]];
+    const bundle=[mk(-150,0.4),mk(-90,0.5),mk(-30,0.35)];
+    ok('identical bundle → 100', g.scoreAngles(bundle,bundle.map(l=>[l[0].slice(),l[1].slice()])).score===100);
+    ok('reversed stroke direction irrelevant', g.scoreAngles(bundle,bundle.map(l=>[l[1].slice(),l[0].slice()])).score===100);
+    const rot=[mk(-140,0.4),mk(-80,0.5),mk(-20,0.35)];
+    const rr2=g.scoreAngles(bundle,rot);
+    ok('rigid rotation: relative gaps read 0', Math.abs(rr2.metrics.relAngleErrDeg)<0.5, 'got '+rr2.metrics.relAngleErrDeg);
+    ok('rigid rotation scores > gap error', rr2.score>g.scoreAngles(bundle,[mk(-150,0.4),mk(-70,0.5),mk(-30,0.35)]).score);
+    ok('missing line penalised', g.scoreAngles(bundle,[bundle[0],bundle[1]]).score<100);
+
+    // --- rdp decimation ---
+    const dense=Array.from({length:400},(_,i)=>[i/399,0.5+Math.sin(i/399*4)*0.2]);
+    const slim=g.rdp(dense,0.002);
+    ok('rdp shrinks dense strokes ≥10×', slim.length*10<=dense.length, dense.length+'→'+slim.length);
+    ok('rdp keeps endpoints', slim[0][0]===dense[0][0] && slim[slim.length-1][0]===dense[dense.length-1][0]);
+
+    // --- generators across all levels ---
+    let genBad=0, polyBad=0;
+    for(const k of ['line','angles','polygon','envelope']) for(let lv=1;lv<=9;lv++) for(let i=0;i<40;i++){
+      const t=gen.make(k,lv);
+      const pts=t.polygon || [].concat.apply([],t.lines);
+      if(pts.some(p=>!isFinite(p[0])||!isFinite(p[1]))) genBad++;
+      if(t.polygon && t.polygon.length<3) polyBad++;
+    }
+    ok('generators: no NaN geometry', genBad===0, genBad+' bad');
+    ok('generators: polygons ≥3 verts', polyBad===0, polyBad+' bad');
+
+    // --- coach / stats robustness ---
+    ok('coach.advice always a string', ['line','polygon','envelope','angles'].every(k=>typeof A.coach.advice(k,{})==='string'));
+    ok('coach.advice(undefined metrics)', typeof A.coach.advice('line')==='string');
+    ok('stats.summary([]) no throw', !!A.stats.summary([]));
+    ok('stats.selfAwareness([]) → null', A.stats.selfAwareness([])===null);
+    ok('charts.line([]) no throw', typeof A.charts.line([])==='string');
+    ok('history.thumbSVG(no target) no throw', typeof A.history.thumbSVG({type:'x',score:1,strokes:[],target:null},80)==='string');
+  } catch(e){ ok('UNCAUGHT EXCEPTION', false, e.message+' '+(e.stack||'').split('\n')[1]); }
+
+  render();
+  function render(){
+    const list=document.getElementById('list'); list.innerHTML='';
+    let pass=0; for(const t of results){ if(t.pass)pass++;
+      list.insertAdjacentHTML('beforeend',`<div class="t"><span class="mark ${t.pass?'ok':'bad'}">${t.pass?'✓':'✕'}</span><span>${t.name}</span><span class="msg">${t.pass?'':t.msg}</span></div>`); }
+    const all=pass===results.length;
+    document.getElementById('summary').innerHTML=`<span class="${all?'ok':'bad'}">${pass}/${results.length} passed</span>`;
+  }
+
+  document.getElementById('fuzzbtn').onclick=function(){
+    let fails=0,ran=0; const types=['line','angles','curve','polygon','envelope'];
+    const rs=()=>{const k=2+Math.floor(Math.random()*8),s=[];for(let i=0;i<k;i++)s.push([Math.random(),Math.random()]);return s;};
+    for(let it=0;it<4000;it++){ const k=types[it%types.length],lv=1+Math.floor(Math.random()*9);
+      try{ const t=gen.make(k,lv); let sc;
+        if(k==='line') sc=g.scoreLine(t.lines[0],g.bestFitSegment(rs())).score;
+        else if(k==='angles') sc=g.scoreAngles(t.lines,[rs(),rs()].map(x=>g.bestFitSegment(x))).score;
+        else if(k==='curve') sc=g.scoreCurve(t.polyline,rs()).score;
+        else sc=g.scoreShape(t.polygon,[].concat(rs(),rs())).score;
+        ran++; if(!isFinite(sc)||sc<0||sc>100) fails++;
+      }catch(e){ fails++; }
+    }
+    alert('Fuzz: '+ran+' ran, '+fails+' failures');
+  };
+})();
+</script>
+</body>
+</html>
