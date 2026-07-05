@@ -928,16 +928,20 @@
     }
     instr.textContent = 'Fade the reference in. How close were you?';
     const hasImg = drill.ref && drill.ref.img;
+    // Objective scoring is now the primary path for image references — it's the
+    // app's superpower (measured feedback) extended from abstract shapes to real
+    // subjects. Self-rating stays as the honest fallback (physical objects, or a
+    // busy multi-figure plate the mask can't isolate).
     result.innerHTML = `<div class="card resultcard">
       ${hasImg ? `<div class="opacityctl"><span class="tiny muted">draw</span>
         <input type="range" id="d-op" min="0" max="100" value="${Math.round(drill.ghostOpacity * 100)}">
         <span class="tiny muted">ref</span></div>` : '<div class="small muted">Compare with your physical subject, then rate honestly.</div>'}
       ${proportionDrift()}
-      <div style="margin:12px 0 6px" class="small">Rate your accuracy</div>
+      ${hasImg ? '<button class="btn block" data-autoscore="1" style="margin-top:10px">Score against the reference ›</button>' : ''}
+      <div style="margin:12px 0 6px" class="small">${hasImg ? 'or rate it yourself' : 'Rate your accuracy'}</div>
       <div class="ratebtns" id="d-rate">
         ${[1, 2, 3, 4, 5].map((n) => `<button data-rate="${n}">${n}</button>`).join('')}</div>
-      <div class="tiny muted" style="margin-top:6px">1 = far off · 5 = very close</div>
-      ${hasImg ? '<button class="btn ghost sm" data-autoscore="1" style="margin-top:8px">Auto-score (beta)</button>' : ''}</div>`;
+      <div class="tiny muted" style="margin-top:6px">1 = far off · 5 = very close</div></div>`;
     const flipBtn = hasImg ? `<button class="btn ghost sm" data-act="flip">Flip ⟲</button>` : '';
     const measureBtn = hasImg
       ? (surface.measureMode
@@ -966,8 +970,11 @@
 
   function showAutoScore() {
     const result = $('#d-result'), instr = $('#d-instr');
-    instr.textContent = 'Auto-score — tune the highlight to cover the subject.';
-    let threshold = 128, invert = false, region = null;
+    instr.textContent = 'Scored against the reference — nudge the highlight if it misses the subject.';
+    // auto-tune the threshold/invert (Otsu) so it works with no fiddling on a
+    // clean subject; the sliders remain for the awkward cases
+    const auto = A.imgScore.autoThreshold(drill.ref.img, null);
+    let threshold = auto.threshold, invert = auto.invert, region = null;
     function recompute() {
       const r = A.imgScore.score(drill.ref.img, surface.strokesDesign(), threshold, invert, region);
       surface.setGhost(A.imgScore.maskPreview(drill.ref.img, threshold, invert, region), 0.6);
@@ -992,22 +999,26 @@
         region = { x: fx(x0), y: fy(y0), w: fx(x1) - fx(x0), h: fy(y1) - fy(y0) };
         if (region.w < 0.03 || region.h < 0.03) region = null;
         surface.cropRect = null; surface.onCropEnd = null;
-        instr.textContent = 'Auto-score — tune the highlight to cover the subject.';
+        instr.textContent = 'Scored against the reference — nudge the highlight if it misses the subject.';
+        // re-tune to the selected panel
+        const a2 = A.imgScore.autoThreshold(drill.ref.img, region); threshold = a2.threshold; invert = a2.invert;
+        const th = $('#as-th'); if (th) th.value = threshold;
+        const inv = $('#as-inv'); if (inv) inv.classList.toggle('sel', invert);
         const pl = $('#as-panel'); if (pl) pl.textContent = region ? '✓ panel selected' : 'whole image';
         recompute();
       };
     }
     result.innerHTML = `<div class="card resultcard">
-      <div class="small" style="margin-bottom:6px">Auto-score (beta) — for multi-panel plates, select one panel.</div>
+      <div class="small" style="margin-bottom:6px">Overlap with the real subject. For a multi-panel plate, select one panel.</div>
       <div class="scorebadge" id="as-score">–</div>
       <div class="tiny muted" id="as-cov" style="margin-bottom:6px"></div>
       <div class="row" style="margin:4px 0;justify-content:center"><button class="btn ghost sm" id="as-crop">Select panel</button>
         <button class="btn ghost sm" id="as-full">Whole image</button>
         <span class="tiny muted" id="as-panel" style="align-self:center">whole image</span></div>
       <div class="opacityctl"><span class="tiny muted">dark</span>
-        <input type="range" id="as-th" min="20" max="235" value="128">
+        <input type="range" id="as-th" min="20" max="235" value="${threshold}">
         <span class="tiny muted">light</span></div>
-      <button class="btn ghost sm" id="as-inv" style="margin-top:6px">Invert subject</button>
+      <button class="btn ghost sm ${invert ? 'sel' : ''}" id="as-inv" style="margin-top:6px">Invert subject</button>
       <div class="row" style="margin-top:10px"><button class="btn ghost block" id="as-back">Self-rate instead</button>
         <button class="btn block" id="as-use">Use score</button></div></div>`;
     $('#d-controls').innerHTML = '';
