@@ -1,0 +1,28 @@
+name: deploy-pages
+# Publishes the pre-built dist/ folder to GitHub Pages on every push to main.
+# Free and unlimited for public repos — no credits, no contributor limits.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:            # allow manual re-runs from the Actions tab
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+concurrency:
+  group: pages
+  cancel-in-progress: true
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: dist
+      - id: deployment
+        uses: actions/deploy-pages@v4
