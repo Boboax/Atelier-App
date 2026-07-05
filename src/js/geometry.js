@@ -124,9 +124,12 @@
     const uLen = geom.dist(u0, u1);
     const lenErrPct = tLen ? (uLen - tLen) / tLen * 100 : 0;
 
-    const angleScore = Math.max(0, 100 - Math.abs(aErr) * 3);     // 33° off → 0
-    const lengthScore = Math.max(0, 100 - Math.abs(lenErrPct) * 1.2); // 83% off → 0
-    const score = Math.round(angleScore * 0.6 + lengthScore * 0.4);
+    const angleScore = Math.max(0, 100 - Math.abs(aErr) * 3);     // 33° off → 0 (kept for display)
+    const lengthScore = Math.max(0, 100 - Math.abs(lenErrPct) * 1.2);
+    // Additive penalty, not a weighted blend: a badly wrong ANGLE is a failed
+    // line and must score low even if the length happens to match (the old blend
+    // let a perpendicular line score 40 on length alone). ~45° off → 0.
+    const score = Math.round(Math.max(0, 100 - Math.abs(aErr) * 2.2 - Math.abs(lenErrPct) * 0.5));
     return {
       score,
       angleErr: +aErr.toFixed(2),          // signed deg (+ = clockwise on screen)
@@ -356,8 +359,11 @@
     const d2 = meanNearest(nt.pts, nu.pts);   // coverage: whole outline covered
     let chamfer = (d1 + d2) / 2;              // normalised units (bbox diagonal = 1)
     if (chamfer < 0.004) chamfer = 0;         // sampling noise — a perfect copy scores 100
-    const sim = Math.max(0, 1 - chamfer * 4.2);                          // ~IoU-like, for display/coach
-    const score = Math.round(Math.max(0, Math.min(100, 100 - chamfer * 340)));
+    // Stricter multiplier (was 340, far too lenient — a circle scored 84 against a
+    // square and a tiny scribble 56). At 700 a clean hand-drawn copy still scores
+    // ~90 while a genuinely wrong contour lands where it should.
+    const score = Math.round(Math.max(0, Math.min(100, 100 - chamfer * 700)));
+    const sim = score / 100;                  // display/coach consistent with the score
     const aspectErrPct = nt.aspect ? (nu.aspect - nt.aspect) / nt.aspect * 100 : 0;
     return {
       score,

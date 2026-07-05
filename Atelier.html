@@ -168,6 +168,14 @@ button{font-family:inherit;touch-action:manipulation}
 .cmpgrid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin:12px 0 8px}
 
 /* ---- teaching card ------------------------------------------------------ */
+/* inline principle row (title always visible; tap to expand the why + how) */
+.learnrow{margin-top:6px}
+.learnbtn{display:flex;align-items:center;gap:8px;width:100%;text-align:left;cursor:pointer;
+  background:var(--paper);border:1px solid var(--line);border-radius:10px;padding:9px 11px;font:inherit;color:var(--ink)}
+.learnbtn .lc-ic{color:var(--accent);font-size:16px;flex:none}
+.learnbtn .lt{flex:1;font-family:var(--serif);font-size:14px;font-weight:600}
+.learnbtn .lchev{color:var(--muted);flex:none}
+.learnbtn:active{background:var(--hair)}
 .learncard{text-align:left;background:var(--paper);border:1px solid var(--line);border-radius:10px;padding:11px 12px;margin-top:6px}
 .learncard .lc-head{font-family:var(--serif);font-size:15px;font-weight:600;display:flex;align-items:center;gap:8px;margin-bottom:6px}
 .learncard .lc-ic{color:var(--accent);font-size:17px}
@@ -477,9 +485,12 @@ window.ATELIER_REFS = [{"id": "ws-lines-1", "title": "Straight lines — set 1",
     const uLen = geom.dist(u0, u1);
     const lenErrPct = tLen ? (uLen - tLen) / tLen * 100 : 0;
 
-    const angleScore = Math.max(0, 100 - Math.abs(aErr) * 3);     // 33° off → 0
-    const lengthScore = Math.max(0, 100 - Math.abs(lenErrPct) * 1.2); // 83% off → 0
-    const score = Math.round(angleScore * 0.6 + lengthScore * 0.4);
+    const angleScore = Math.max(0, 100 - Math.abs(aErr) * 3);     // 33° off → 0 (kept for display)
+    const lengthScore = Math.max(0, 100 - Math.abs(lenErrPct) * 1.2);
+    // Additive penalty, not a weighted blend: a badly wrong ANGLE is a failed
+    // line and must score low even if the length happens to match (the old blend
+    // let a perpendicular line score 40 on length alone). ~45° off → 0.
+    const score = Math.round(Math.max(0, 100 - Math.abs(aErr) * 2.2 - Math.abs(lenErrPct) * 0.5));
     return {
       score,
       angleErr: +aErr.toFixed(2),          // signed deg (+ = clockwise on screen)
@@ -709,8 +720,11 @@ window.ATELIER_REFS = [{"id": "ws-lines-1", "title": "Straight lines — set 1",
     const d2 = meanNearest(nt.pts, nu.pts);   // coverage: whole outline covered
     let chamfer = (d1 + d2) / 2;              // normalised units (bbox diagonal = 1)
     if (chamfer < 0.004) chamfer = 0;         // sampling noise — a perfect copy scores 100
-    const sim = Math.max(0, 1 - chamfer * 4.2);                          // ~IoU-like, for display/coach
-    const score = Math.round(Math.max(0, Math.min(100, 100 - chamfer * 340)));
+    // Stricter multiplier (was 340, far too lenient — a circle scored 84 against a
+    // square and a tiny scribble 56). At 700 a clean hand-drawn copy still scores
+    // ~90 while a genuinely wrong contour lands where it should.
+    const score = Math.round(Math.max(0, Math.min(100, 100 - chamfer * 700)));
+    const sim = score / 100;                  // display/coach consistent with the score
     const aspectErrPct = nt.aspect ? (nu.aspect - nt.aspect) / nt.aspect * 100 : 0;
     return {
       score,
@@ -3743,16 +3757,61 @@ window.ATELIER_REFS = [{"id": "ws-lines-1", "title": "Straight lines — set 1",
     return uni ? inter / uni : 0;
   }
 
+  // ---- edge / contour matching (for line-art references: Bargue block-ins) ----
+  // A block-in is thin lines on white, not a filled silhouette, so silhouette IoU
+  // is meaningless for it. Instead compare the SHAPE of your line network to the
+  // plate's: both point sets bbox-normalised (so it's position/size invariant,
+  // like the memory drills), symmetric chamfer weighted toward precision (are your
+  // marks on the plate's lines) over coverage (did you cover the whole plate).
+  function maskPoints(mask, cap) {
+    const pts = [];
+    for (let i = 0; i < mask.length; i++) if (mask[i]) pts.push([(i % G) / G, ((i / G) | 0) / G]);
+    if (cap && pts.length > cap) { const step = Math.ceil(pts.length / cap); return pts.filter((_, i) => i % step === 0); }
+    return pts;
+  }
+  function normCloud(pts) {
+    let a = 1e9, b = 1e9, c = -1e9, d = -1e9;
+    for (const p of pts) { if (p[0] < a) a = p[0]; if (p[0] > c) c = p[0]; if (p[1] < b) b = p[1]; if (p[1] > d) d = p[1]; }
+    const cx = (a + c) / 2, cy = (b + d) / 2, diag = Math.hypot(c - a, d - b) || 1;
+    return pts.map((p) => [(p[0] - cx) / diag, (p[1] - cy) / diag]);
+  }
+  function meanNearest(A, B) {
+    if (!A.length || !B.length) return 1;
+    let s = 0;
+    for (const p of A) { let m = 1e9; for (const q of B) { const dx = p[0] - q[0], dy = p[1] - q[1], dd = dx * dx + dy * dy; if (dd < m) m = dd; } s += Math.sqrt(m); }
+    return s / A.length;
+  }
+  function edgeScore(refMask, strokesDesign) {
+    const ref = normCloud(maskPoints(refMask, 500));
+    let usr = [];
+    for (const s of strokesDesign) for (const p of s) usr.push([p[0], p[1]]);
+    if (usr.length > 400) { const step = Math.ceil(usr.length / 400); usr = usr.filter((_, i) => i % step === 0); }
+    if (ref.length < 8 || usr.length < 4) return { score: 0, iou: 0, method: 'edge' };
+    const nu = normCloud(usr);
+    const prec = meanNearest(nu, ref);   // your marks → nearest plate line
+    const cov = meanNearest(ref, nu);    // plate lines → nearest of your marks
+    const ch = 0.65 * prec + 0.35 * cov;
+    const score = Math.round(Math.max(0, Math.min(100, 100 - ch * 260)));
+    return { score, iou: +(score / 100).toFixed(3), method: 'edge' };
+  }
+
   const imgScore = {
     autoThreshold,
-    // returns {iou, score, coverage} comparing user's filled shape to the thresholded subject
+    // returns {iou, score, coverage, method}. Auto-selects: a filled subject is
+    // scored by silhouette overlap; a line-art plate by edge/contour matching.
     score(img, strokesDesign, threshold, invert, region) {
-      if (!img || !strokesDesign || !strokesDesign.length) return { iou: 0, score: 0, coverage: 0 };
+      if (!img || !strokesDesign || !strokesDesign.length) return { iou: 0, score: 0, coverage: 0, method: 'none' };
       const ref = maskFromImage(img, threshold == null ? 128 : threshold, invert, region);
+      let cov = 0; for (let i = 0; i < ref.length; i++) cov += ref[i];
+      const coverage = cov / (G * G);
+      // thin mask ⇒ line drawing (block-in) ⇒ edge matching, not silhouette IoU
+      if (coverage < 0.12) {
+        const e = edgeScore(ref, strokesDesign);
+        return { iou: e.iou, score: e.score, coverage, method: 'edge' };
+      }
       const usr = maskFromStrokes(strokesDesign);
       const v = iou(ref, usr);
-      let cov = 0; for (let i = 0; i < ref.length; i++) cov += ref[i];
-      return { iou: +v.toFixed(3), score: Math.round(Math.max(0, Math.min(100, Math.pow(v, 0.62) * 100))), coverage: cov / (G * G) };
+      return { iou: +v.toFixed(3), score: Math.round(Math.max(0, Math.min(100, Math.pow(v, 0.62) * 100))), coverage, method: 'silhouette' };
     },
     // height:width of the thresholded subject's bounding box (for a proportion check).
     // Returns null if the mask is empty. Region/threshold same meaning as score().
@@ -4673,9 +4732,11 @@ window.ATELIER_REFS = [{"id": "ws-lines-1", "title": "Straight lines — set 1",
         <div class="tiny muted" style="margin:2px 0 8px">${esc(aw)} · off by ${r.estErr}%</div>`;
     }
     const coachRow = r.coaching ? `<div class="insight" style="text-align:left">${esc(r.coaching)}</div>` : '';
-    // teaching layer: the WHY + the master's method, on demand (self-controlled)
+    // teaching layer: show the principle's TITLE inline (no click needed) with the
+    // icon; the fuller "why + how" expands on tap so the card stays light.
     const pr = A.coach.principle(drill.exKey, r);
-    const learnRow = pr ? `<div id="d-learn"><button class="btn ghost sm block" data-learn="1" style="margin-top:6px">Why &amp; how ›</button></div>` : '';
+    const learnRow = pr ? `<div id="d-learn" class="learnrow"><button class="learnbtn" data-learn="1">
+        <span class="lc-ic">${pr.icon}</span><span class="lt">${esc(pr.title)}</span><span class="lchev">›</span></button></div>` : '';
     // faded feedback with self-controlled access: the breakdown thins out with
     // skill, but the learner can always ASK for it (autonomy-supportive feedback)
     const detail = r.showDetail ? metricRows
@@ -4779,9 +4840,14 @@ window.ATELIER_REFS = [{"id": "ws-lines-1", "title": "Straight lines — set 1",
       surface.setGhost(A.imgScore.maskPreview(drill.ref.img, threshold, invert, region), 0.6);
       const sb = $('#as-score'); if (sb) { sb.textContent = r.score; sb.className = 'scorebadge ' + scoreClass(r.score); }
       const cov = $('#as-cov'); if (cov) {
-        const c = region ? r.coverage * 4 : r.coverage;   // a panel is ~¼ of the plate
-        let warn = c > 0.6 ? ' · mask too large — adjust' : r.coverage < 0.005 ? ' · mask too small — adjust' : '';
-        cov.textContent = 'overlap ' + Math.round(r.iou * 100) + '%' + warn;
+        if (r.method === 'edge') {
+          // line-art plate: scored by how well your lines follow the plate's
+          cov.textContent = 'line match ' + Math.round(r.iou * 100) + '% · block-in';
+        } else {
+          const c = region ? r.coverage * 4 : r.coverage;   // a panel is ~¼ of the plate
+          const warn = c > 0.6 ? ' · mask too large — adjust' : r.coverage < 0.005 ? ' · mask too small — adjust' : '';
+          cov.textContent = 'overlap ' + Math.round(r.iou * 100) + '%' + warn;
+        }
       }
       return r;
     }
@@ -5384,7 +5450,7 @@ window.ATELIER_REFS = [{"id": "ws-lines-1", "title": "Straight lines — set 1",
   // Stamped by build/build.js: A.VERSION from build/version.json, A.BUILD from
   // the build clock (YYMMDD.HHMM). These literals are only the un-built dev fallback.
   A.VERSION = '1.6.0';
-  A.BUILD = '260705.2306';
+  A.BUILD = '260705.2320';
   function boot() {
     try { A.ui.init(); }
     catch (e) {

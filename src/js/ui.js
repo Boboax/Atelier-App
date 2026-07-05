@@ -891,9 +891,11 @@
         <div class="tiny muted" style="margin:2px 0 8px">${esc(aw)} · off by ${r.estErr}%</div>`;
     }
     const coachRow = r.coaching ? `<div class="insight" style="text-align:left">${esc(r.coaching)}</div>` : '';
-    // teaching layer: the WHY + the master's method, on demand (self-controlled)
+    // teaching layer: show the principle's TITLE inline (no click needed) with the
+    // icon; the fuller "why + how" expands on tap so the card stays light.
     const pr = A.coach.principle(drill.exKey, r);
-    const learnRow = pr ? `<div id="d-learn"><button class="btn ghost sm block" data-learn="1" style="margin-top:6px">Why &amp; how ›</button></div>` : '';
+    const learnRow = pr ? `<div id="d-learn" class="learnrow"><button class="learnbtn" data-learn="1">
+        <span class="lc-ic">${pr.icon}</span><span class="lt">${esc(pr.title)}</span><span class="lchev">›</span></button></div>` : '';
     // faded feedback with self-controlled access: the breakdown thins out with
     // skill, but the learner can always ASK for it (autonomy-supportive feedback)
     const detail = r.showDetail ? metricRows
@@ -997,9 +999,14 @@
       surface.setGhost(A.imgScore.maskPreview(drill.ref.img, threshold, invert, region), 0.6);
       const sb = $('#as-score'); if (sb) { sb.textContent = r.score; sb.className = 'scorebadge ' + scoreClass(r.score); }
       const cov = $('#as-cov'); if (cov) {
-        const c = region ? r.coverage * 4 : r.coverage;   // a panel is ~¼ of the plate
-        let warn = c > 0.6 ? ' · mask too large — adjust' : r.coverage < 0.005 ? ' · mask too small — adjust' : '';
-        cov.textContent = 'overlap ' + Math.round(r.iou * 100) + '%' + warn;
+        if (r.method === 'edge') {
+          // line-art plate: scored by how well your lines follow the plate's
+          cov.textContent = 'line match ' + Math.round(r.iou * 100) + '% · block-in';
+        } else {
+          const c = region ? r.coverage * 4 : r.coverage;   // a panel is ~¼ of the plate
+          const warn = c > 0.6 ? ' · mask too large — adjust' : r.coverage < 0.005 ? ' · mask too small — adjust' : '';
+          cov.textContent = 'overlap ' + Math.round(r.iou * 100) + '%' + warn;
+        }
       }
       return r;
     }

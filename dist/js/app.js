@@ -6,7 +6,7 @@
   // Stamped by build/build.js: A.VERSION from build/version.json, A.BUILD from
   // the build clock (YYMMDD.HHMM). These literals are only the un-built dev fallback.
   A.VERSION = '1.6.0';
-  A.BUILD = '260705.2306';
+  A.BUILD = '260705.2320';
   function boot() {
     try { A.ui.init(); }
     catch (e) {

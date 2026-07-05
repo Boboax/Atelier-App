@@ -124,16 +124,61 @@
     return uni ? inter / uni : 0;
   }
 
+  // ---- edge / contour matching (for line-art references: Bargue block-ins) ----
+  // A block-in is thin lines on white, not a filled silhouette, so silhouette IoU
+  // is meaningless for it. Instead compare the SHAPE of your line network to the
+  // plate's: both point sets bbox-normalised (so it's position/size invariant,
+  // like the memory drills), symmetric chamfer weighted toward precision (are your
+  // marks on the plate's lines) over coverage (did you cover the whole plate).
+  function maskPoints(mask, cap) {
+    const pts = [];
+    for (let i = 0; i < mask.length; i++) if (mask[i]) pts.push([(i % G) / G, ((i / G) | 0) / G]);
+    if (cap && pts.length > cap) { const step = Math.ceil(pts.length / cap); return pts.filter((_, i) => i % step === 0); }
+    return pts;
+  }
+  function normCloud(pts) {
+    let a = 1e9, b = 1e9, c = -1e9, d = -1e9;
+    for (const p of pts) { if (p[0] < a) a = p[0]; if (p[0] > c) c = p[0]; if (p[1] < b) b = p[1]; if (p[1] > d) d = p[1]; }
+    const cx = (a + c) / 2, cy = (b + d) / 2, diag = Math.hypot(c - a, d - b) || 1;
+    return pts.map((p) => [(p[0] - cx) / diag, (p[1] - cy) / diag]);
+  }
+  function meanNearest(A, B) {
+    if (!A.length || !B.length) return 1;
+    let s = 0;
+    for (const p of A) { let m = 1e9; for (const q of B) { const dx = p[0] - q[0], dy = p[1] - q[1], dd = dx * dx + dy * dy; if (dd < m) m = dd; } s += Math.sqrt(m); }
+    return s / A.length;
+  }
+  function edgeScore(refMask, strokesDesign) {
+    const ref = normCloud(maskPoints(refMask, 500));
+    let usr = [];
+    for (const s of strokesDesign) for (const p of s) usr.push([p[0], p[1]]);
+    if (usr.length > 400) { const step = Math.ceil(usr.length / 400); usr = usr.filter((_, i) => i % step === 0); }
+    if (ref.length < 8 || usr.length < 4) return { score: 0, iou: 0, method: 'edge' };
+    const nu = normCloud(usr);
+    const prec = meanNearest(nu, ref);   // your marks → nearest plate line
+    const cov = meanNearest(ref, nu);    // plate lines → nearest of your marks
+    const ch = 0.65 * prec + 0.35 * cov;
+    const score = Math.round(Math.max(0, Math.min(100, 100 - ch * 260)));
+    return { score, iou: +(score / 100).toFixed(3), method: 'edge' };
+  }
+
   const imgScore = {
     autoThreshold,
-    // returns {iou, score, coverage} comparing user's filled shape to the thresholded subject
+    // returns {iou, score, coverage, method}. Auto-selects: a filled subject is
+    // scored by silhouette overlap; a line-art plate by edge/contour matching.
     score(img, strokesDesign, threshold, invert, region) {
-      if (!img || !strokesDesign || !strokesDesign.length) return { iou: 0, score: 0, coverage: 0 };
+      if (!img || !strokesDesign || !strokesDesign.length) return { iou: 0, score: 0, coverage: 0, method: 'none' };
       const ref = maskFromImage(img, threshold == null ? 128 : threshold, invert, region);
+      let cov = 0; for (let i = 0; i < ref.length; i++) cov += ref[i];
+      const coverage = cov / (G * G);
+      // thin mask ⇒ line drawing (block-in) ⇒ edge matching, not silhouette IoU
+      if (coverage < 0.12) {
+        const e = edgeScore(ref, strokesDesign);
+        return { iou: e.iou, score: e.score, coverage, method: 'edge' };
+      }
       const usr = maskFromStrokes(strokesDesign);
       const v = iou(ref, usr);
-      let cov = 0; for (let i = 0; i < ref.length; i++) cov += ref[i];
-      return { iou: +v.toFixed(3), score: Math.round(Math.max(0, Math.min(100, Math.pow(v, 0.62) * 100))), coverage: cov / (G * G) };
+      return { iou: +v.toFixed(3), score: Math.round(Math.max(0, Math.min(100, Math.pow(v, 0.62) * 100))), coverage, method: 'silhouette' };
     },
     // height:width of the thresholded subject's bounding box (for a proportion check).
     // Returns null if the mask is empty. Region/threshold same meaning as score().
