@@ -874,6 +874,9 @@
         <div class="tiny muted" style="margin:2px 0 8px">${esc(aw)} · off by ${r.estErr}%</div>`;
     }
     const coachRow = r.coaching ? `<div class="insight" style="text-align:left">${esc(r.coaching)}</div>` : '';
+    // teaching layer: the WHY + the master's method, on demand (self-controlled)
+    const pr = A.coach.principle(drill.exKey, r);
+    const learnRow = pr ? `<div id="d-learn"><button class="btn ghost sm block" data-learn="1" style="margin-top:6px">Why &amp; how ›</button></div>` : '';
     // faded feedback with self-controlled access: the breakdown thins out with
     // skill, but the learner can always ASK for it (autonomy-supportive feedback)
     const detail = r.showDetail ? metricRows
@@ -881,10 +884,19 @@
     result.innerHTML = `<div class="card resultcard">
       <div class="scorebadge ${scoreClass(r.score)}">${r.score}</div>
       <div class="muted small" style="margin-bottom:8px">${r.recall ? 'retention accuracy' : 'accuracy'}</div>${pbMsg}${tutMsg}${modeMsg}${glanceMsg}
-      ${estRow}${detail}${coachRow}${lvlMsg}</div>`;
+      ${estRow}${detail}${coachRow}${learnRow}${lvlMsg}</div>`;
     if (!r.showDetail) {
       const slot = $('#d-detail', result);
       if (slot) slot.querySelector('[data-showdetail]').onpointerup = (e) => { e.preventDefault(); slot.innerHTML = metricRows; };
+    }
+    if (pr) {
+      const slot = $('#d-learn', result);
+      if (slot) slot.querySelector('[data-learn]').onpointerup = (e) => {
+        e.preventDefault();
+        slot.innerHTML = `<div class="learncard"><div class="lc-head"><span class="lc-ic">${pr.icon}</span>${esc(pr.title)}</div>
+          <div class="lc-why">${esc(pr.why)}</div>
+          <div class="lc-how"><b>How:</b> ${esc(pr.how)}</div></div>`;
+      };
     }
     controls.innerHTML = drill.isRecall
       ? `<button class="btn ghost sm" data-act="again">Study it again</button>
