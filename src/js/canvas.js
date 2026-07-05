@@ -395,6 +395,20 @@
         const a = this.toPx(ln[0]), b = this.toPx(ln[1]);
         ctx.beginPath(); ctx.moveTo(a[0], a[1]); ctx.lineTo(b[0], b[1]); ctx.stroke();
       }
+    } else if (t.kind === 'gesture') {
+      // head + mass ovals only during STUDY (they make it read as a figure);
+      // the line of action is the thing memorised, redrawn and scored
+      if (this.showTarget && t.head) {
+        ctx.save(); ctx.globalAlpha = 0.5;
+        const drawOval = (cx, cy, rx, ry) => { const c = this.toPx([cx, cy]); ctx.beginPath(); ctx.ellipse(c[0], c[1], rx * this.box.s, ry * this.box.s, 0, 0, Math.PI * 2); ctx.stroke(); };
+        drawOval(t.head[0], t.head[1], t.head[2], t.head[2]);
+        (t.masses || []).forEach((m) => drawOval(m[0], m[1], m[2], m[3]));
+        ctx.restore();
+      }
+      ctx.beginPath();
+      const g0 = this.toPx(t.loa[0]); ctx.moveTo(g0[0], g0[1]);
+      for (let i = 1; i < t.loa.length; i++) { const p = this.toPx(t.loa[i]); ctx.lineTo(p[0], p[1]); }
+      ctx.lineWidth = (lineW || 2.5) + 1; ctx.stroke();
     } else if (t.polyline) {            // open curve — stroke, no fill, no close
       ctx.beginPath();
       const q0 = this.toPx(t.polyline[0]); ctx.moveTo(q0[0], q0[1]);

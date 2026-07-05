@@ -25,6 +25,7 @@
     line: 'its slant & length', angles: 'the angles between & the relative lengths',
     curve: 'its start, end & apex — the furthest point it bows out',
     polygon: 'each corner’s position & the proportions', envelope: 'the outer envelope, then where the contour turns sharply vs flows',
+    gesture: 'the line of action — the single sweep from head to foot',
     contour: 'the path of the edge', negative: 'the empty shapes between the forms',
     bargue: 'the big straight block-in', value: 'where light turns to dark',
     master: 'the largest shapes & their placement'
@@ -474,6 +475,7 @@
     angles: 'Note how the lines relate — the angle between them and their relative lengths — not their position. Reproduce those relationships from memory.',
     polygon: 'Fix each corner’s position relative to the others. Block the whole shape in, then check its proportion before committing.',
     envelope: 'Find the outer “envelope” first — the largest straight lines that contain the form — then facet into smaller straights and round to the true contour, noticing where the edge turns sharply versus flows. General to specific.',
+    gesture: 'A figure is shown as its line of action — one flowing line through the whole pose, with the head and main masses. Memorise that line, then draw it from memory in a single sweep. It’s the rhythm you’re after, not the outline; push the curve a little.',
     contour: 'Trace one continuous edge slowly with your eyes, then draw it from memory in a single, unhurried line. It’s about seeing the edge, not speed.',
     negative: 'Ignore the object itself — memorise only the empty shapes around and between the forms, then draw those negative shapes.',
     bargue: 'Study only the straight-line block-in stage. Draw the outer envelope from memory, then fade the plate back over your drawing to see where you drifted.',
@@ -551,7 +553,7 @@
     // recommendation engine demand a drill sessions never actually served
     const queue = kind === 'warmup'
       ? shuffledQueue(['line', 'angles', 'curve', 'polygon'], cfg.n)
-      : shuffledQueue(['line', 'angles', 'curve', 'polygon', 'envelope'], cfg.n);
+      : shuffledQueue(['line', 'angles', 'curve', 'polygon', 'envelope', 'gesture'], cfg.n);
     session = { kind, queue, completed: 0, results: [], day: A.habit.today() };
     // mixed sessions end on a FINISHER: the capstone drill one level up
     // (peak-end rule — the session's last memory is a real challenge). It never
@@ -874,6 +876,9 @@
         <div class="tiny muted" style="margin:2px 0 8px">${esc(aw)} · off by ${r.estErr}%</div>`;
     }
     const coachRow = r.coaching ? `<div class="insight" style="text-align:left">${esc(r.coaching)}</div>` : '';
+    // teaching layer: the WHY + the master's method, on demand (self-controlled)
+    const pr = A.coach.principle(drill.exKey, r);
+    const learnRow = pr ? `<div id="d-learn"><button class="btn ghost sm block" data-learn="1" style="margin-top:6px">Why &amp; how ›</button></div>` : '';
     // faded feedback with self-controlled access: the breakdown thins out with
     // skill, but the learner can always ASK for it (autonomy-supportive feedback)
     const detail = r.showDetail ? metricRows
@@ -881,10 +886,19 @@
     result.innerHTML = `<div class="card resultcard">
       <div class="scorebadge ${scoreClass(r.score)}">${r.score}</div>
       <div class="muted small" style="margin-bottom:8px">${r.recall ? 'retention accuracy' : 'accuracy'}</div>${pbMsg}${tutMsg}${modeMsg}${glanceMsg}
-      ${estRow}${detail}${coachRow}${lvlMsg}</div>`;
+      ${estRow}${detail}${coachRow}${learnRow}${lvlMsg}</div>`;
     if (!r.showDetail) {
       const slot = $('#d-detail', result);
       if (slot) slot.querySelector('[data-showdetail]').onpointerup = (e) => { e.preventDefault(); slot.innerHTML = metricRows; };
+    }
+    if (pr) {
+      const slot = $('#d-learn', result);
+      if (slot) slot.querySelector('[data-learn]').onpointerup = (e) => {
+        e.preventDefault();
+        slot.innerHTML = `<div class="learncard"><div class="lc-head"><span class="lc-ic">${pr.icon}</span>${esc(pr.title)}</div>
+          <div class="lc-why">${esc(pr.why)}</div>
+          <div class="lc-how"><b>How:</b> ${esc(pr.how)}</div></div>`;
+      };
     }
     controls.innerHTML = drill.isRecall
       ? `<button class="btn ghost sm" data-act="again">Study it again</button>
@@ -916,16 +930,20 @@
     }
     instr.textContent = 'Fade the reference in. How close were you?';
     const hasImg = drill.ref && drill.ref.img;
+    // Objective scoring is now the primary path for image references — it's the
+    // app's superpower (measured feedback) extended from abstract shapes to real
+    // subjects. Self-rating stays as the honest fallback (physical objects, or a
+    // busy multi-figure plate the mask can't isolate).
     result.innerHTML = `<div class="card resultcard">
       ${hasImg ? `<div class="opacityctl"><span class="tiny muted">draw</span>
         <input type="range" id="d-op" min="0" max="100" value="${Math.round(drill.ghostOpacity * 100)}">
         <span class="tiny muted">ref</span></div>` : '<div class="small muted">Compare with your physical subject, then rate honestly.</div>'}
       ${proportionDrift()}
-      <div style="margin:12px 0 6px" class="small">Rate your accuracy</div>
+      ${hasImg ? '<button class="btn block" data-autoscore="1" style="margin-top:10px">Score against the reference ›</button>' : ''}
+      <div style="margin:12px 0 6px" class="small">${hasImg ? 'or rate it yourself' : 'Rate your accuracy'}</div>
       <div class="ratebtns" id="d-rate">
         ${[1, 2, 3, 4, 5].map((n) => `<button data-rate="${n}">${n}</button>`).join('')}</div>
-      <div class="tiny muted" style="margin-top:6px">1 = far off · 5 = very close</div>
-      ${hasImg ? '<button class="btn ghost sm" data-autoscore="1" style="margin-top:8px">Auto-score (beta)</button>' : ''}</div>`;
+      <div class="tiny muted" style="margin-top:6px">1 = far off · 5 = very close</div></div>`;
     const flipBtn = hasImg ? `<button class="btn ghost sm" data-act="flip">Flip ⟲</button>` : '';
     const measureBtn = hasImg
       ? (surface.measureMode
@@ -954,8 +972,11 @@
 
   function showAutoScore() {
     const result = $('#d-result'), instr = $('#d-instr');
-    instr.textContent = 'Auto-score — tune the highlight to cover the subject.';
-    let threshold = 128, invert = false, region = null;
+    instr.textContent = 'Scored against the reference — nudge the highlight if it misses the subject.';
+    // auto-tune the threshold/invert (Otsu) so it works with no fiddling on a
+    // clean subject; the sliders remain for the awkward cases
+    const auto = A.imgScore.autoThreshold(drill.ref.img, null);
+    let threshold = auto.threshold, invert = auto.invert, region = null;
     function recompute() {
       const r = A.imgScore.score(drill.ref.img, surface.strokesDesign(), threshold, invert, region);
       surface.setGhost(A.imgScore.maskPreview(drill.ref.img, threshold, invert, region), 0.6);
@@ -980,22 +1001,26 @@
         region = { x: fx(x0), y: fy(y0), w: fx(x1) - fx(x0), h: fy(y1) - fy(y0) };
         if (region.w < 0.03 || region.h < 0.03) region = null;
         surface.cropRect = null; surface.onCropEnd = null;
-        instr.textContent = 'Auto-score — tune the highlight to cover the subject.';
+        instr.textContent = 'Scored against the reference — nudge the highlight if it misses the subject.';
+        // re-tune to the selected panel
+        const a2 = A.imgScore.autoThreshold(drill.ref.img, region); threshold = a2.threshold; invert = a2.invert;
+        const th = $('#as-th'); if (th) th.value = threshold;
+        const inv = $('#as-inv'); if (inv) inv.classList.toggle('sel', invert);
         const pl = $('#as-panel'); if (pl) pl.textContent = region ? '✓ panel selected' : 'whole image';
         recompute();
       };
     }
     result.innerHTML = `<div class="card resultcard">
-      <div class="small" style="margin-bottom:6px">Auto-score (beta) — for multi-panel plates, select one panel.</div>
+      <div class="small" style="margin-bottom:6px">Overlap with the real subject. For a multi-panel plate, select one panel.</div>
       <div class="scorebadge" id="as-score">–</div>
       <div class="tiny muted" id="as-cov" style="margin-bottom:6px"></div>
       <div class="row" style="margin:4px 0;justify-content:center"><button class="btn ghost sm" id="as-crop">Select panel</button>
         <button class="btn ghost sm" id="as-full">Whole image</button>
         <span class="tiny muted" id="as-panel" style="align-self:center">whole image</span></div>
       <div class="opacityctl"><span class="tiny muted">dark</span>
-        <input type="range" id="as-th" min="20" max="235" value="128">
+        <input type="range" id="as-th" min="20" max="235" value="${threshold}">
         <span class="tiny muted">light</span></div>
-      <button class="btn ghost sm" id="as-inv" style="margin-top:6px">Invert subject</button>
+      <button class="btn ghost sm ${invert ? 'sel' : ''}" id="as-inv" style="margin-top:6px">Invert subject</button>
       <div class="row" style="margin-top:10px"><button class="btn ghost block" id="as-back">Self-rate instead</button>
         <button class="btn block" id="as-use">Use score</button></div></div>`;
     $('#d-controls').innerHTML = '';

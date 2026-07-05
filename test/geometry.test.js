@@ -54,21 +54,46 @@ test('rdp: 10x+ decimation, endpoints kept', () => {
   assert.deepEqual(slim[slim.length - 1], dense[dense.length - 1]);
 });
 
-test('generators: no NaN, polygons valid, scores in range (fuzz 2000)', () => {
+test('gesture: authored poses valid across levels; line of action scores by curve match', () => {
+  const A = load();
+  const g = A.geom, gen = A.gen;
+  let bad = 0;
+  for (let i = 0; i < 500; i++) {
+    const t = gen.gesture(1 + (i % 9));
+    if (t.kind !== 'gesture' || !t.loa || t.loa.length < 3) { bad++; continue; }
+    if (t.loa.some((p) => !isFinite(p[0]) || !isFinite(p[1]))) bad++;
+    if (!t.head || t.head.length !== 3) bad++;
+    const s = g.scoreCurve(t.loa, t.loa.map((p) => [p[0] + (Math.random() - 0.5) * 0.03, p[1] + (Math.random() - 0.5) * 0.03])).score;
+    if (!isFinite(s) || s < 0 || s > 100) bad++;
+  }
+  assert.equal(bad, 0);
+  const t0 = gen.gesture(1);
+  assert.ok(g.scoreCurve(t0.loa, t0.loa.map((p) => p.slice())).score >= 99, 'identical LoA ~100');
+  assert.equal(g.scoreCurve(t0.loa, [[0.5, 0.5], [0.5, 0.5]]).score, 0, 'a tap scores 0');
+});
+
+test('gesture: level 1 offers only the simplest poses, level 9 the full set', () => {
+  const gen = load().gen;
+  // higher levels must never fail to produce a pose
+  for (let lv = 1; lv <= 9; lv++) assert.ok(gen.gesture(lv).loa.length > 3, 'level ' + lv);
+});
+
+test('generators: no NaN, polygons valid, scores in range (fuzz 2400)', () => {
   const A = load();
   const g = A.geom, gen = A.gen;
   const noisy = (ps) => ps.map((p) => [p[0] + (Math.random() - 0.5) * 0.05, p[1] + (Math.random() - 0.5) * 0.05]);
   let bad = 0;
-  for (let i = 0; i < 2000; i++) {
-    const kind = ['line', 'angles', 'curve', 'polygon', 'envelope'][i % 5];
+  for (let i = 0; i < 2400; i++) {
+    const kind = ['line', 'angles', 'curve', 'polygon', 'envelope', 'gesture'][i % 6];
     const t = gen.make(kind, 1 + (i % 9));
-    const pts = t.polygon || t.polyline || t.lines.flat();
+    const pts = t.polygon || t.polyline || t.loa || t.lines.flat();
     if (pts.some((p) => !isFinite(p[0]) || !isFinite(p[1]))) bad++;
     if (t.polygon && t.polygon.length < 3) bad++;
     let s;
     if (kind === 'line') s = g.scoreLine(t.lines[0], noisy(t.lines[0])).score;
     else if (kind === 'angles') s = g.scoreAngles(t.lines, t.lines.map(noisy)).score;
     else if (kind === 'curve') s = g.scoreCurve(t.polyline, noisy(t.polyline)).score;
+    else if (kind === 'gesture') s = g.scoreCurve(t.loa, noisy(t.loa)).score;
     else s = g.scoreShape(t.polygon, noisy(t.polygon)).score;
     if (!isFinite(s) || s < 0 || s > 100) bad++;
   }

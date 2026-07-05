@@ -241,7 +241,7 @@
 
   Drill.prototype.canEvaluate = function () {
     if (this.surface.isEmpty()) return false;
-    if (this.exKey === 'line' || this.exKey === 'curve') return this.surface.totalPoints() >= 2;
+    if (this.exKey === 'line' || this.exKey === 'curve' || this.exKey === 'gesture') return this.surface.totalPoints() >= 2;
     if (this.exKey === 'polygon' || this.exKey === 'envelope') return this.surface.totalPoints() >= 3;
     return true;
   };
@@ -273,6 +273,8 @@
         r = A.geom.scoreAngles(tt, ut);
       } else if (this.exKey === 'curve') {
         r = A.geom.scoreCurve(this.target.polyline, this.surface.pointsDesign());
+      } else if (this.exKey === 'gesture') {
+        r = A.geom.scoreCurve(this.target.loa, this.surface.pointsDesign());
       } else {
         // score from ALL strokes combined (a shape drawn in several strokes is fine)
         r = A.geom.scoreShape(this.target.polygon, this.surface.pointsDesign());

@@ -42,6 +42,45 @@
     return m;
   }
 
+  // Otsu's method: find the luminance threshold that best separates the image
+  // into two classes (subject vs background) by maximising between-class
+  // variance. Also decides invert by which side yields a plausible subject size,
+  // so auto-score works with no manual tuning on a clean, single-subject image.
+  function autoThreshold(img, region) {
+    const x = ctx(); x.clearRect(0, 0, G, G);
+    const iw = img.naturalWidth || img.width, ih = img.naturalHeight || img.height;
+    const r = fitRect(iw, ih);
+    x.drawImage(img, r.x, r.y, r.w, r.h);
+    const d = x.getImageData(0, 0, G, G).data;
+    let rx0 = 0, ry0 = 0, rx1 = G, ry1 = G;
+    if (region) { rx0 = r.x + region.x * r.w; ry0 = r.y + region.y * r.h; rx1 = rx0 + region.w * r.w; ry1 = ry0 + region.h * r.h; }
+    const hist = new Array(256).fill(0);
+    let total = 0;
+    for (let i = 0, j = 0; i < d.length; i += 4, j++) {
+      const px = j % G, py = (j / G) | 0;
+      if (px < rx0 || px > rx1 || py < ry0 || py > ry1) continue;
+      if (d[i + 3] < 30) continue;
+      const L = (0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2]) | 0;
+      hist[L]++; total++;
+    }
+    if (!total) return { threshold: 128, invert: false };
+    let sum = 0; for (let t = 0; t < 256; t++) sum += t * hist[t];
+    let sumB = 0, wB = 0, best = 0, thr = 128;
+    for (let t = 0; t < 256; t++) {
+      wB += hist[t]; if (!wB) continue;
+      const wF = total - wB; if (!wF) break;
+      sumB += t * hist[t];
+      const mB = sumB / wB, mF = (sum - sumB) / wF;
+      const between = wB * wF * (mB - mF) * (mB - mF);
+      if (between > best) { best = between; thr = t; }
+    }
+    // subject is usually the darker, smaller region; if "dark" covers most of the
+    // frame, the subject is the light side instead
+    let dark = 0; for (let t = 0; t <= thr; t++) dark += hist[t];
+    const invert = (dark / total) > 0.5;
+    return { threshold: thr, invert };
+  }
+
   function maskFromStrokes(strokes) {
     const x = ctx(); x.clearRect(0, 0, G, G); x.fillStyle = '#fff';
     for (const s of strokes) {
@@ -86,6 +125,7 @@
   }
 
   const imgScore = {
+    autoThreshold,
     // returns {iou, score, coverage} comparing user's filled shape to the thresholded subject
     score(img, strokesDesign, threshold, invert, region) {
       if (!img || !strokesDesign || !strokesDesign.length) return { iou: 0, score: 0, coverage: 0 };

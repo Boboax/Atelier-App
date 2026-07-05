@@ -153,6 +153,13 @@ button{font-family:inherit;touch-action:manipulation}
 /* ---- then vs now -------------------------------------------------------- */
 .cmpgrid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin:12px 0 8px}
 
+/* ---- teaching card ------------------------------------------------------ */
+.learncard{text-align:left;background:var(--paper);border:1px solid var(--line);border-radius:10px;padding:11px 12px;margin-top:6px}
+.learncard .lc-head{font-family:var(--serif);font-size:15px;font-weight:600;display:flex;align-items:center;gap:8px;margin-bottom:6px}
+.learncard .lc-ic{color:var(--accent);font-size:17px}
+.learncard .lc-why{font-size:13px;color:var(--muted);margin-bottom:6px;line-height:1.5}
+.learncard .lc-how{font-size:13px;line-height:1.5}
+
 /* ---- calendar strip ---------------------------------------------------- */
 .cal{display:grid;grid-template-columns:repeat(14,1fr);gap:6px}
 .cal .d{aspect-ratio:1;border-radius:8px;background:var(--hair);

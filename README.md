@@ -49,10 +49,10 @@ iPadOS can clear an unused web app's storage after a few weeks. In
 
 | Module | Drill | Scoring |
 |---|---|---|
-| 1 | Lines & Angles, Angle Relationships | objective (angle°, length%) |
+| 1 | Lines & Angles, Angle Relationships, Curves | objective (angle°, length%, curve match) |
 | 2 | Polygons | objective (shape overlap, proportion) |
-| 3 | Complex Envelopes | objective (shape overlap, proportion) |
-| 4 | Negative Space, Bargue Block-In, Value/Terminator, Master Copy | self-rated (ghost the reference back) |
+| 3 | Complex Envelopes, Gesture (Line of Action) | objective (contour / line-of-action match) |
+| 4 | Negative Space, Bargue Block-In, Value/Terminator, Master Copy | objective auto-score against the reference (silhouette overlap), or self-rated |
 
 Generated drills know their own ground truth, so they score you objectively and
 track **systematic bias** (e.g. "you rotate lines +4° clockwise") in Stats.
@@ -67,10 +67,20 @@ Grounded in drawing-perception studies and motor-learning science:
   shows guess-vs-actual, a "self-awareness" trend and your signed calibration
   (over/under-confidence). (Error self-estimation builds the internal
   error-detector — Chiviacowsky & Wulf.)
-- **One coaching cue + faded feedback.** Reveal gives a single corrective ("aim
-  anticlockwise"); the full metric breakdown appears less and less often as you
-  level up (guidance hypothesis) — but a "Show breakdown" button keeps it
-  available on request (self-controlled feedback, OPTIMAL theory).
+- **One coaching cue + faded feedback + a teaching layer.** Reveal gives a single
+  corrective ("aim anticlockwise"); the full metric breakdown appears less and
+  less often as you level up (guidance hypothesis) — but a "Show breakdown"
+  button keeps it available on request (self-controlled feedback, OPTIMAL
+  theory). A "Why & how" card, keyed to your dominant error, teaches the
+  principle behind the fix and how the atelier tradition solves it.
+- **Gesture (line of action).** A figure pose is shown as its single rhythmic
+  line through head, ribcage and pelvis; you memorise the line and redraw it
+  from memory, scored by curve match — the core of figure drawing, trained the
+  Atelier way.
+- **Objective scoring of real subjects.** Memory drawings of Bargue plates and
+  imported photos are auto-scored by silhouette overlap (auto-tuned threshold),
+  extending measured feedback beyond abstract shapes; self-rating remains the
+  fallback.
 - **Retention hold.** From level 4 a short "picture it" pause sits between hide
   and draw, so the drawing comes from encoded memory, not the afterimage. And a
   daily **Retention check** re-serves a figure you studied on a previous day —
