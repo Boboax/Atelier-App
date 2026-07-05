@@ -24,6 +24,10 @@
         if (m.iou != null && m.iou < 0.6) return 'Follow the bend more closely — pin the start, end and apex (furthest bow) first.';
         return 'Nice curve — smooth and close to the path.';
       }
+      if (exKey === 'gesture') {
+        if (m.iou != null && m.iou < 0.7) return 'Find the main sweep — one long line head to foot. Push the curve rather than tracing the outline.';
+        return 'Strong line of action — you caught the pose’s rhythm.';
+      }
       // shapes
       if (m.aspectErrPct != null && Math.abs(m.aspectErrPct) >= 8)
         return `Proportion off — you drew it too ${m.aspectErrPct > 0 ? 'wide; make it taller/narrower' : 'tall; make it wider'} (~${Math.abs(m.aspectErrPct)}%).`;
@@ -71,6 +75,9 @@
       apex: { icon: '⌒', title: 'Pin the anchors, then the bow',
         why: 'A curve is fully described by its two endpoints and its apex — the furthest point it departs from the straight line between them. Fix those three and the curve almost draws itself.',
         how: 'Before the sweep, mark start, end, and where (and how far) it bows out. Draw through those points in one unhurried stroke rather than feeling your way along the edge.' },
+      loa: { icon: '⟋', title: 'One line through the whole figure',
+        why: 'A pose reads as a single rhythmic line — the line of action — before any anatomy. Catching that flow first is what makes a gesture feel alive instead of stiff, and it’s the first mark every figure artist makes.',
+        how: 'Draw the longest continuous line from the head down the spine to the weight-bearing foot in one stroke. Push the curve a little further than you think you see — a gesture exaggerates the rhythm.' },
       calibration: { icon: '👁', title: 'Judge before you’re told',
         why: 'Estimating your own accuracy before the reveal builds the internal error-detector — the skill that lets you self-correct without a teacher. The shrinking gap between guess and truth IS the progress.',
         how: 'Commit to a real number every time; a specific wrong guess teaches far more than a vague one. Over sessions, watch the self-read gap in Stats close.' },
@@ -88,6 +95,8 @@
         if (l != null && Math.abs(l) >= 6) return coach.PRINCIPLES.length;
       } else if (exKey === 'curve') {
         if (m.iou != null && m.iou < 0.75) return coach.PRINCIPLES.apex;
+      } else if (exKey === 'gesture') {
+        if (m.iou != null && m.iou < 0.8) return coach.PRINCIPLES.loa;
       } else {   // polygon / envelope
         if (m.aspectErrPct != null && Math.abs(m.aspectErrPct) >= 8) return coach.PRINCIPLES.proportion;
         if (m.iou != null && m.iou < 0.75) return coach.PRINCIPLES.envelope;

@@ -1226,6 +1226,47 @@ window.ATELIER_REFS = [{"id": "ws-lines-1", "title": "Straight lines — set 1",
     return { kind: 'envelope', polygon: fitToBox(pts, 0.12) };
   };
 
+  /* ---- gesture: the line of action through a figure ----------------------
+     A pose reads as one rhythmic line before any anatomy. Each authored pose
+     is a line-of-action control path plus a head + a couple of mass ovals
+     (ribcage/pelvis) shown ONLY during study, so it reads as a figure; the
+     learner memorises and redraws the LINE, scored by curve match. Placement
+     flips/scales/jitters so repeats vary. Complexity (dynamism) gates by level. */
+  const POSES = [
+    { minL: 1, loa: [[0.50, 0.13], [0.50, 0.33], [0.52, 0.53], [0.48, 0.72], [0.50, 0.90]], head: [0.50, 0.10, 0.055], masses: [[0.51, 0.36, 0.075, 0.11], [0.49, 0.60, 0.065, 0.10]] },   // standing
+    { minL: 1, loa: [[0.46, 0.13], [0.50, 0.33], [0.57, 0.53], [0.50, 0.72], [0.46, 0.90]], head: [0.45, 0.10, 0.055], masses: [[0.49, 0.36, 0.075, 0.11], [0.55, 0.58, 0.065, 0.10]] },   // contrapposto
+    { minL: 2, loa: [[0.55, 0.09], [0.50, 0.29], [0.48, 0.50], [0.50, 0.71], [0.52, 0.92]], head: [0.56, 0.07, 0.05], masses: [[0.50, 0.33, 0.07, 0.11], [0.49, 0.60, 0.065, 0.10]] },    // reaching up
+    { minL: 2, loa: [[0.40, 0.13], [0.48, 0.31], [0.58, 0.49], [0.54, 0.70], [0.46, 0.90]], head: [0.38, 0.10, 0.055], masses: [[0.47, 0.35, 0.075, 0.10], [0.55, 0.58, 0.065, 0.10]] },   // leaning twist
+    { minL: 3, loa: [[0.62, 0.13], [0.52, 0.31], [0.44, 0.49], [0.50, 0.67], [0.42, 0.87]], head: [0.64, 0.10, 0.05], masses: [[0.51, 0.35, 0.075, 0.10], [0.47, 0.58, 0.065, 0.10]] },    // running
+    { minL: 3, loa: [[0.40, 0.15], [0.52, 0.30], [0.61, 0.50], [0.52, 0.70], [0.40, 0.88]], head: [0.38, 0.12, 0.055], masses: [[0.50, 0.34, 0.08, 0.10], [0.54, 0.60, 0.065, 0.10]] },   // dancing arc
+    { minL: 4, loa: [[0.44, 0.24], [0.54, 0.35], [0.60, 0.50], [0.50, 0.62], [0.40, 0.70]], head: [0.42, 0.21, 0.055], masses: [[0.53, 0.40, 0.08, 0.09], [0.50, 0.58, 0.07, 0.08]] },     // crouching
+    { minL: 4, loa: [[0.10, 0.52], [0.32, 0.47], [0.52, 0.53], [0.72, 0.48], [0.90, 0.55]], head: [0.07, 0.52, 0.05], masses: [[0.34, 0.50, 0.10, 0.08], [0.62, 0.51, 0.09, 0.07]] },      // reclining
+    { minL: 5, loa: [[0.42, 0.14], [0.50, 0.28], [0.62, 0.44], [0.54, 0.63], [0.42, 0.86]], head: [0.40, 0.11, 0.05], masses: [[0.50, 0.32, 0.075, 0.10], [0.57, 0.55, 0.065, 0.10]] },    // twist reach across
+    { minL: 6, loa: [[0.40, 0.22], [0.50, 0.27], [0.63, 0.42], [0.57, 0.62], [0.44, 0.84]], head: [0.38, 0.19, 0.05], masses: [[0.51, 0.33, 0.08, 0.09], [0.58, 0.55, 0.065, 0.10]] }      // backbend
+  ];
+  function placeGesture(pose) {
+    const flip = Math.random() < 0.5;
+    const s = rnd(0.92, 1.04);
+    const dx = rnd(-0.02, 0.02), dy = rnd(-0.02, 0.02);
+    const tx = (p) => {
+      let x = flip ? 1 - p[0] : p[0], y = p[1];
+      x = 0.5 + (x - 0.5) * s + dx; y = 0.5 + (y - 0.5) * s + dy;
+      return [x, y];
+    };
+    const loaCtrl = pose.loa.map(tx);
+    const h = tx([pose.head[0], pose.head[1]]);
+    return {
+      kind: 'gesture',
+      loa: smoothOpen(loaCtrl, 12),
+      head: [h[0], h[1], pose.head[2] * s],
+      masses: (pose.masses || []).map((m) => { const c = tx([m[0], m[1]]); return [c[0], c[1], m[2] * s, m[3] * s]; })
+    };
+  }
+  gen.gesture = function (level) {
+    const pool = POSES.filter((p) => p.minL <= level);
+    return placeGesture(pool[Math.floor(Math.random() * pool.length)]);
+  };
+
   // Dispatch by exercise key.
   gen.make = function (exKey, level) {
     switch (exKey) {
@@ -1234,6 +1275,7 @@ window.ATELIER_REFS = [{"id": "ws-lines-1", "title": "Straight lines — set 1",
       case 'angles': return gen.angles(level);
       case 'polygon': return gen.polygon(level);
       case 'envelope': return gen.envelope(level);
+      case 'gesture': return gen.gesture(level);
       default: return gen.line(level);
     }
   };
@@ -1640,6 +1682,20 @@ window.ATELIER_REFS = [{"id": "ws-lines-1", "title": "Straight lines — set 1",
         const a = this.toPx(ln[0]), b = this.toPx(ln[1]);
         ctx.beginPath(); ctx.moveTo(a[0], a[1]); ctx.lineTo(b[0], b[1]); ctx.stroke();
       }
+    } else if (t.kind === 'gesture') {
+      // head + mass ovals only during STUDY (they make it read as a figure);
+      // the line of action is the thing memorised, redrawn and scored
+      if (this.showTarget && t.head) {
+        ctx.save(); ctx.globalAlpha = 0.5;
+        const drawOval = (cx, cy, rx, ry) => { const c = this.toPx([cx, cy]); ctx.beginPath(); ctx.ellipse(c[0], c[1], rx * this.box.s, ry * this.box.s, 0, 0, Math.PI * 2); ctx.stroke(); };
+        drawOval(t.head[0], t.head[1], t.head[2], t.head[2]);
+        (t.masses || []).forEach((m) => drawOval(m[0], m[1], m[2], m[3]));
+        ctx.restore();
+      }
+      ctx.beginPath();
+      const g0 = this.toPx(t.loa[0]); ctx.moveTo(g0[0], g0[1]);
+      for (let i = 1; i < t.loa.length; i++) { const p = this.toPx(t.loa[i]); ctx.lineTo(p[0], p[1]); }
+      ctx.lineWidth = (lineW || 2.5) + 1; ctx.stroke();
     } else if (t.polyline) {            // open curve — stroke, no fill, no close
       ctx.beginPath();
       const q0 = this.toPx(t.polyline[0]); ctx.moveTo(q0[0], q0[1]);
@@ -1850,6 +1906,9 @@ window.ATELIER_REFS = [{"id": "ws-lines-1", "title": "Straight lines — set 1",
     { key: 'envelope', name: 'Complex Envelopes', module: 3, scored: true,
       blurb: 'Real organic forms: block the outer envelope in straight lines, then refine to the true contour.',
       study: (l) => clamp(Math.round(26 - l * 1.6), 6, 26), draw: 45, maxLevel: 9 },
+    { key: 'gesture', name: 'Gesture (Line of Action)', module: 3, scored: true,
+      blurb: 'Capture a pose’s line of action from memory — one flowing line through the whole figure.',
+      study: (l) => clamp(Math.round(10 - l), 2, 10), draw: 20, maxLevel: 9 },
     { key: 'contour', name: 'Contour (Edges)', module: 4, scored: false, refCat: 'any',
       blurb: 'Trace one edge slowly from memory — eyes on the form, building edge-perception.',
       study: () => 40, draw: null, maxLevel: 1 },
@@ -1882,7 +1941,7 @@ window.ATELIER_REFS = [{"id": "ws-lines-1", "title": "Straight lines — set 1",
     modules: [
       { n: 1, name: 'Lines, Angles & Curves', note: 'Length, angle and the bow of a curve — the foundation of all measurement.' },
       { n: 2, name: 'Polygons', note: 'Closed shapes and internal proportion.' },
-      { n: 3, name: 'Envelopes', note: 'Organic form blocked in with straight lines.' },
+      { n: 3, name: 'Envelopes & Gesture', note: 'Organic form blocked in with straight lines, and the figure’s line of action.' },
       { n: 4, name: 'Real Subjects', note: 'Negative space, Bargue plates, value, master copies.' }
     ],
 
@@ -2093,6 +2152,10 @@ window.ATELIER_REFS = [{"id": "ws-lines-1", "title": "Straight lines — set 1",
         if (m.iou != null && m.iou < 0.6) return 'Follow the bend more closely — pin the start, end and apex (furthest bow) first.';
         return 'Nice curve — smooth and close to the path.';
       }
+      if (exKey === 'gesture') {
+        if (m.iou != null && m.iou < 0.7) return 'Find the main sweep — one long line head to foot. Push the curve rather than tracing the outline.';
+        return 'Strong line of action — you caught the pose’s rhythm.';
+      }
       // shapes
       if (m.aspectErrPct != null && Math.abs(m.aspectErrPct) >= 8)
         return `Proportion off — you drew it too ${m.aspectErrPct > 0 ? 'wide; make it taller/narrower' : 'tall; make it wider'} (~${Math.abs(m.aspectErrPct)}%).`;
@@ -2140,6 +2203,9 @@ window.ATELIER_REFS = [{"id": "ws-lines-1", "title": "Straight lines — set 1",
       apex: { icon: '⌒', title: 'Pin the anchors, then the bow',
         why: 'A curve is fully described by its two endpoints and its apex — the furthest point it departs from the straight line between them. Fix those three and the curve almost draws itself.',
         how: 'Before the sweep, mark start, end, and where (and how far) it bows out. Draw through those points in one unhurried stroke rather than feeling your way along the edge.' },
+      loa: { icon: '⟋', title: 'One line through the whole figure',
+        why: 'A pose reads as a single rhythmic line — the line of action — before any anatomy. Catching that flow first is what makes a gesture feel alive instead of stiff, and it’s the first mark every figure artist makes.',
+        how: 'Draw the longest continuous line from the head down the spine to the weight-bearing foot in one stroke. Push the curve a little further than you think you see — a gesture exaggerates the rhythm.' },
       calibration: { icon: '👁', title: 'Judge before you’re told',
         why: 'Estimating your own accuracy before the reveal builds the internal error-detector — the skill that lets you self-correct without a teacher. The shrinking gap between guess and truth IS the progress.',
         how: 'Commit to a real number every time; a specific wrong guess teaches far more than a vague one. Over sessions, watch the self-read gap in Stats close.' },
@@ -2157,6 +2223,8 @@ window.ATELIER_REFS = [{"id": "ws-lines-1", "title": "Straight lines — set 1",
         if (l != null && Math.abs(l) >= 6) return coach.PRINCIPLES.length;
       } else if (exKey === 'curve') {
         if (m.iou != null && m.iou < 0.75) return coach.PRINCIPLES.apex;
+      } else if (exKey === 'gesture') {
+        if (m.iou != null && m.iou < 0.8) return coach.PRINCIPLES.loa;
       } else {   // polygon / envelope
         if (m.aspectErrPct != null && Math.abs(m.aspectErrPct) >= 8) return coach.PRINCIPLES.proportion;
         if (m.iou != null && m.iou < 0.75) return coach.PRINCIPLES.envelope;
@@ -2700,7 +2768,7 @@ window.ATELIER_REFS = [{"id": "ws-lines-1", "title": "Straight lines — set 1",
 
   Drill.prototype.canEvaluate = function () {
     if (this.surface.isEmpty()) return false;
-    if (this.exKey === 'line' || this.exKey === 'curve') return this.surface.totalPoints() >= 2;
+    if (this.exKey === 'line' || this.exKey === 'curve' || this.exKey === 'gesture') return this.surface.totalPoints() >= 2;
     if (this.exKey === 'polygon' || this.exKey === 'envelope') return this.surface.totalPoints() >= 3;
     return true;
   };
@@ -2732,6 +2800,8 @@ window.ATELIER_REFS = [{"id": "ws-lines-1", "title": "Straight lines — set 1",
         r = A.geom.scoreAngles(tt, ut);
       } else if (this.exKey === 'curve') {
         r = A.geom.scoreCurve(this.target.polyline, this.surface.pointsDesign());
+      } else if (this.exKey === 'gesture') {
+        r = A.geom.scoreCurve(this.target.loa, this.surface.pointsDesign());
       } else {
         // score from ALL strokes combined (a shape drawn in several strokes is fine)
         r = A.geom.scoreShape(this.target.polygon, this.surface.pointsDesign());
@@ -3406,6 +3476,7 @@ window.ATELIER_REFS = [{"id": "ws-lines-1", "title": "Straight lines — set 1",
   function targetPathsDesign(att) {
     const t = att.target; if (!t) return { lines: [], polys: [], curves: [] };
     if (t.kind === 'line' || t.kind === 'angles') return { lines: t.lines, polys: [], curves: [] };
+    if (t.kind === 'gesture' && t.loa) return { lines: [], polys: [], curves: [t.loa] };
     if (t.polyline) return { lines: [], polys: [], curves: [t.polyline] };
     if (t.polygon) return { lines: [], polys: [t.polygon], curves: [] };
     return { lines: [], polys: [], curves: [] };
@@ -3706,6 +3777,7 @@ window.ATELIER_REFS = [{"id": "ws-lines-1", "title": "Straight lines — set 1",
     line: 'its slant & length', angles: 'the angles between & the relative lengths',
     curve: 'its start, end & apex — the furthest point it bows out',
     polygon: 'each corner’s position & the proportions', envelope: 'the outer envelope, then where the contour turns sharply vs flows',
+    gesture: 'the line of action — the single sweep from head to foot',
     contour: 'the path of the edge', negative: 'the empty shapes between the forms',
     bargue: 'the big straight block-in', value: 'where light turns to dark',
     master: 'the largest shapes & their placement'
@@ -4155,6 +4227,7 @@ window.ATELIER_REFS = [{"id": "ws-lines-1", "title": "Straight lines — set 1",
     angles: 'Note how the lines relate — the angle between them and their relative lengths — not their position. Reproduce those relationships from memory.',
     polygon: 'Fix each corner’s position relative to the others. Block the whole shape in, then check its proportion before committing.',
     envelope: 'Find the outer “envelope” first — the largest straight lines that contain the form — then facet into smaller straights and round to the true contour, noticing where the edge turns sharply versus flows. General to specific.',
+    gesture: 'A figure is shown as its line of action — one flowing line through the whole pose, with the head and main masses. Memorise that line, then draw it from memory in a single sweep. It’s the rhythm you’re after, not the outline; push the curve a little.',
     contour: 'Trace one continuous edge slowly with your eyes, then draw it from memory in a single, unhurried line. It’s about seeing the edge, not speed.',
     negative: 'Ignore the object itself — memorise only the empty shapes around and between the forms, then draw those negative shapes.',
     bargue: 'Study only the straight-line block-in stage. Draw the outer envelope from memory, then fade the plate back over your drawing to see where you drifted.',
@@ -4232,7 +4305,7 @@ window.ATELIER_REFS = [{"id": "ws-lines-1", "title": "Straight lines — set 1",
     // recommendation engine demand a drill sessions never actually served
     const queue = kind === 'warmup'
       ? shuffledQueue(['line', 'angles', 'curve', 'polygon'], cfg.n)
-      : shuffledQueue(['line', 'angles', 'curve', 'polygon', 'envelope'], cfg.n);
+      : shuffledQueue(['line', 'angles', 'curve', 'polygon', 'envelope', 'gesture'], cfg.n);
     session = { kind, queue, completed: 0, results: [], day: A.habit.today() };
     // mixed sessions end on a FINISHER: the capstone drill one level up
     // (peak-end rule — the session's last memory is a real challenge). It never
@@ -5262,7 +5335,7 @@ window.ATELIER_REFS = [{"id": "ws-lines-1", "title": "Straight lines — set 1",
   // Stamped by build/build.js: A.VERSION from build/version.json, A.BUILD from
   // the build clock (YYMMDD.HHMM). These literals are only the un-built dev fallback.
   A.VERSION = '1.4.0';
-  A.BUILD = '260705.1436';
+  A.BUILD = '260705.1443';
   function boot() {
     try { A.ui.init(); }
     catch (e) {

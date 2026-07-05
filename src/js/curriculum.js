@@ -38,6 +38,9 @@
     { key: 'envelope', name: 'Complex Envelopes', module: 3, scored: true,
       blurb: 'Real organic forms: block the outer envelope in straight lines, then refine to the true contour.',
       study: (l) => clamp(Math.round(26 - l * 1.6), 6, 26), draw: 45, maxLevel: 9 },
+    { key: 'gesture', name: 'Gesture (Line of Action)', module: 3, scored: true,
+      blurb: 'Capture a pose’s line of action from memory — one flowing line through the whole figure.',
+      study: (l) => clamp(Math.round(10 - l), 2, 10), draw: 20, maxLevel: 9 },
     { key: 'contour', name: 'Contour (Edges)', module: 4, scored: false, refCat: 'any',
       blurb: 'Trace one edge slowly from memory — eyes on the form, building edge-perception.',
       study: () => 40, draw: null, maxLevel: 1 },
@@ -70,7 +73,7 @@
     modules: [
       { n: 1, name: 'Lines, Angles & Curves', note: 'Length, angle and the bow of a curve — the foundation of all measurement.' },
       { n: 2, name: 'Polygons', note: 'Closed shapes and internal proportion.' },
-      { n: 3, name: 'Envelopes', note: 'Organic form blocked in with straight lines.' },
+      { n: 3, name: 'Envelopes & Gesture', note: 'Organic form blocked in with straight lines, and the figure’s line of action.' },
       { n: 4, name: 'Real Subjects', note: 'Negative space, Bargue plates, value, master copies.' }
     ],
 

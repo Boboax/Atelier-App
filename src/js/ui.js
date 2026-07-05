@@ -25,6 +25,7 @@
     line: 'its slant & length', angles: 'the angles between & the relative lengths',
     curve: 'its start, end & apex — the furthest point it bows out',
     polygon: 'each corner’s position & the proportions', envelope: 'the outer envelope, then where the contour turns sharply vs flows',
+    gesture: 'the line of action — the single sweep from head to foot',
     contour: 'the path of the edge', negative: 'the empty shapes between the forms',
     bargue: 'the big straight block-in', value: 'where light turns to dark',
     master: 'the largest shapes & their placement'
@@ -474,6 +475,7 @@
     angles: 'Note how the lines relate — the angle between them and their relative lengths — not their position. Reproduce those relationships from memory.',
     polygon: 'Fix each corner’s position relative to the others. Block the whole shape in, then check its proportion before committing.',
     envelope: 'Find the outer “envelope” first — the largest straight lines that contain the form — then facet into smaller straights and round to the true contour, noticing where the edge turns sharply versus flows. General to specific.',
+    gesture: 'A figure is shown as its line of action — one flowing line through the whole pose, with the head and main masses. Memorise that line, then draw it from memory in a single sweep. It’s the rhythm you’re after, not the outline; push the curve a little.',
     contour: 'Trace one continuous edge slowly with your eyes, then draw it from memory in a single, unhurried line. It’s about seeing the edge, not speed.',
     negative: 'Ignore the object itself — memorise only the empty shapes around and between the forms, then draw those negative shapes.',
     bargue: 'Study only the straight-line block-in stage. Draw the outer envelope from memory, then fade the plate back over your drawing to see where you drifted.',
@@ -551,7 +553,7 @@
     // recommendation engine demand a drill sessions never actually served
     const queue = kind === 'warmup'
       ? shuffledQueue(['line', 'angles', 'curve', 'polygon'], cfg.n)
-      : shuffledQueue(['line', 'angles', 'curve', 'polygon', 'envelope'], cfg.n);
+      : shuffledQueue(['line', 'angles', 'curve', 'polygon', 'envelope', 'gesture'], cfg.n);
     session = { kind, queue, completed: 0, results: [], day: A.habit.today() };
     // mixed sessions end on a FINISHER: the capstone drill one level up
     // (peak-end rule — the session's last memory is a real challenge). It never

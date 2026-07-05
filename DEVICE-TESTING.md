@@ -29,6 +29,9 @@ iPad with the Apple Pencil after each install. ✅ / ❌ / note.
 - [ ] **Retention check** (Home, from day 2): serves a previous day's figure cold; reveal is framed as retention; no level change.
 - [ ] Redraw/Re-study after a reveal is labelled a correction and doesn't change level or personal bests.
 - [ ] **Dark mode**: switch iPad appearance — chrome goes dark, drawing paper stays white, everything stays legible.
+- [ ] **Gesture drill** (Module 3): the study screen shows a figure (head + mass ovals + line of action); after hiding, drawing the sweep from memory scores sensibly.
+- [ ] **Teaching layer**: after a scored reveal, "Why & how" expands a principle card matched to your error.
+- [ ] **Real-subject auto-score**: on a Bargue plate or imported photo, "Score against the reference" highlights the subject (auto-tuned) and gives an overlap score; the threshold/invert sliders and panel-select adjust it.
 - [ ] Estimate-before-reveal works; reveal card sits at the **bottom** and the red-vs-ink comparison is visible above it.
 - [ ] Guides/Flip buttons show on/off state; guides fade out by level.
 - [ ] Staged Bargue: envelope → facet → refine, with Reveal at the last stage.

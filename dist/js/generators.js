@@ -223,6 +223,47 @@
     return { kind: 'envelope', polygon: fitToBox(pts, 0.12) };
   };
 
+  /* ---- gesture: the line of action through a figure ----------------------
+     A pose reads as one rhythmic line before any anatomy. Each authored pose
+     is a line-of-action control path plus a head + a couple of mass ovals
+     (ribcage/pelvis) shown ONLY during study, so it reads as a figure; the
+     learner memorises and redraws the LINE, scored by curve match. Placement
+     flips/scales/jitters so repeats vary. Complexity (dynamism) gates by level. */
+  const POSES = [
+    { minL: 1, loa: [[0.50, 0.13], [0.50, 0.33], [0.52, 0.53], [0.48, 0.72], [0.50, 0.90]], head: [0.50, 0.10, 0.055], masses: [[0.51, 0.36, 0.075, 0.11], [0.49, 0.60, 0.065, 0.10]] },   // standing
+    { minL: 1, loa: [[0.46, 0.13], [0.50, 0.33], [0.57, 0.53], [0.50, 0.72], [0.46, 0.90]], head: [0.45, 0.10, 0.055], masses: [[0.49, 0.36, 0.075, 0.11], [0.55, 0.58, 0.065, 0.10]] },   // contrapposto
+    { minL: 2, loa: [[0.55, 0.09], [0.50, 0.29], [0.48, 0.50], [0.50, 0.71], [0.52, 0.92]], head: [0.56, 0.07, 0.05], masses: [[0.50, 0.33, 0.07, 0.11], [0.49, 0.60, 0.065, 0.10]] },    // reaching up
+    { minL: 2, loa: [[0.40, 0.13], [0.48, 0.31], [0.58, 0.49], [0.54, 0.70], [0.46, 0.90]], head: [0.38, 0.10, 0.055], masses: [[0.47, 0.35, 0.075, 0.10], [0.55, 0.58, 0.065, 0.10]] },   // leaning twist
+    { minL: 3, loa: [[0.62, 0.13], [0.52, 0.31], [0.44, 0.49], [0.50, 0.67], [0.42, 0.87]], head: [0.64, 0.10, 0.05], masses: [[0.51, 0.35, 0.075, 0.10], [0.47, 0.58, 0.065, 0.10]] },    // running
+    { minL: 3, loa: [[0.40, 0.15], [0.52, 0.30], [0.61, 0.50], [0.52, 0.70], [0.40, 0.88]], head: [0.38, 0.12, 0.055], masses: [[0.50, 0.34, 0.08, 0.10], [0.54, 0.60, 0.065, 0.10]] },   // dancing arc
+    { minL: 4, loa: [[0.44, 0.24], [0.54, 0.35], [0.60, 0.50], [0.50, 0.62], [0.40, 0.70]], head: [0.42, 0.21, 0.055], masses: [[0.53, 0.40, 0.08, 0.09], [0.50, 0.58, 0.07, 0.08]] },     // crouching
+    { minL: 4, loa: [[0.10, 0.52], [0.32, 0.47], [0.52, 0.53], [0.72, 0.48], [0.90, 0.55]], head: [0.07, 0.52, 0.05], masses: [[0.34, 0.50, 0.10, 0.08], [0.62, 0.51, 0.09, 0.07]] },      // reclining
+    { minL: 5, loa: [[0.42, 0.14], [0.50, 0.28], [0.62, 0.44], [0.54, 0.63], [0.42, 0.86]], head: [0.40, 0.11, 0.05], masses: [[0.50, 0.32, 0.075, 0.10], [0.57, 0.55, 0.065, 0.10]] },    // twist reach across
+    { minL: 6, loa: [[0.40, 0.22], [0.50, 0.27], [0.63, 0.42], [0.57, 0.62], [0.44, 0.84]], head: [0.38, 0.19, 0.05], masses: [[0.51, 0.33, 0.08, 0.09], [0.58, 0.55, 0.065, 0.10]] }      // backbend
+  ];
+  function placeGesture(pose) {
+    const flip = Math.random() < 0.5;
+    const s = rnd(0.92, 1.04);
+    const dx = rnd(-0.02, 0.02), dy = rnd(-0.02, 0.02);
+    const tx = (p) => {
+      let x = flip ? 1 - p[0] : p[0], y = p[1];
+      x = 0.5 + (x - 0.5) * s + dx; y = 0.5 + (y - 0.5) * s + dy;
+      return [x, y];
+    };
+    const loaCtrl = pose.loa.map(tx);
+    const h = tx([pose.head[0], pose.head[1]]);
+    return {
+      kind: 'gesture',
+      loa: smoothOpen(loaCtrl, 12),
+      head: [h[0], h[1], pose.head[2] * s],
+      masses: (pose.masses || []).map((m) => { const c = tx([m[0], m[1]]); return [c[0], c[1], m[2] * s, m[3] * s]; })
+    };
+  }
+  gen.gesture = function (level) {
+    const pool = POSES.filter((p) => p.minL <= level);
+    return placeGesture(pool[Math.floor(Math.random() * pool.length)]);
+  };
+
   // Dispatch by exercise key.
   gen.make = function (exKey, level) {
     switch (exKey) {
@@ -231,6 +272,7 @@
       case 'angles': return gen.angles(level);
       case 'polygon': return gen.polygon(level);
       case 'envelope': return gen.envelope(level);
+      case 'gesture': return gen.gesture(level);
       default: return gen.line(level);
     }
   };
