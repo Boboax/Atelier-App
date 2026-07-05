@@ -54,6 +54,25 @@ test('rdp: 10x+ decimation, endpoints kept', () => {
   assert.deepEqual(slim[slim.length - 1], dense[dense.length - 1]);
 });
 
+test('curve scoring rewards the bow, not bbox overlap (no more straight-line-scores-97)', () => {
+  const g = load().geom;
+  // a strongly bowed S line of action
+  const T = [[0.5, 0.08], [0.6, 0.28], [0.44, 0.5], [0.58, 0.72], [0.5, 0.92]];
+  const good = [[0.5, 0.08], [0.585, 0.29], [0.45, 0.5], [0.565, 0.71], [0.5, 0.92]];
+  const straight = [[0.5, 0.08], [0.5, 0.3], [0.5, 0.5], [0.5, 0.7], [0.5, 0.92]];
+  const opposite = [[0.5, 0.08], [0.4, 0.28], [0.56, 0.5], [0.42, 0.72], [0.5, 0.92]];
+  const shifted = good.map((p) => [p[0] + 0.12, p[1] - 0.06]);
+  const reversed = good.slice().reverse();
+  const sc = (u) => g.scoreCurve(T, u).score;
+  assert.equal(sc(T), 100, 'identical = 100');
+  assert.ok(sc(good) >= 90, 'a close copy still scores high: ' + sc(good));
+  assert.ok(sc(shifted) >= 88, 'position/scale invariant: ' + sc(shifted));
+  assert.ok(sc(reversed) >= 88, 'draw-direction invariant: ' + sc(reversed));
+  assert.ok(sc(straight) < 82, 'a straight line must NOT score like the S: ' + sc(straight));
+  assert.ok(sc(opposite) < 65, 'an opposite bend must score poorly: ' + sc(opposite));
+  assert.ok(sc(good) - sc(straight) >= 12, 'good clearly beats straight');
+});
+
 test('gesture: authored poses valid across levels; line of action scores by curve match', () => {
   const A = load();
   const g = A.geom, gen = A.gen;

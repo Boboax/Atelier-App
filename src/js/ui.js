@@ -146,6 +146,7 @@
     const d = $('#drill'); d.classList.add('on');
     surface.opts.pencilOnly = A.store.get('pencilOnly', false);
     surface.opts.baseWidth = A.store.get('inkWidth', 3.2);
+    surface.opts.smooth = A.store.get('smooth', 0.5);
     setTimeout(() => { surface.resize(); drill.startRecall(att.type, att.target); }, 0);
   }
 
@@ -461,7 +462,7 @@
       <div class="controls" id="d-controls"></div>
     </div>`);
     document.body.appendChild(d);
-    surface = new A.Surface($('#d-canvas', d), { pencilOnly: A.store.get('pencilOnly', false), baseWidth: A.store.get('inkWidth', 3.2) });
+    surface = new A.Surface($('#d-canvas', d), { pencilOnly: A.store.get('pencilOnly', false), baseWidth: A.store.get('inkWidth', 3.2), smooth: A.store.get('smooth', 0.5) });
     drill = new A.Drill(surface);
     drill.onState = updateDrill;
     drill.onTick = updateTimer;
@@ -682,6 +683,7 @@
     const d = $('#drill'); d.classList.add('on');
     surface.opts.pencilOnly = A.store.get('pencilOnly', false);
     surface.opts.baseWidth = A.store.get('inkWidth', 3.2);
+    surface.opts.smooth = A.store.get('smooth', 0.5);
     // setTimeout (not rAF) so startup still runs if the first frame is throttled
     setTimeout(() => { surface.resize(); drill.startExercise(exKey, refItem, opts); }, 0);
   }
@@ -790,7 +792,10 @@
     }
     else if (drill.phase === 'draw') {
       const flipBtn = !def.scored && drill.ref && drill.ref.img ? `<button class="btn ghost sm ${surface.ghostFlip ? 'sel' : ''}" data-act="flip">Flip ⟲</button>` : '';
-      const glanceBtn = `<button class="btn ghost sm" data-act="glance" ${drill.glancesLeft() <= 0 ? 'disabled' : ''}>Glance${drill.glanceCap ? ' ' + drill.glancesLeft() : ''}</button>`;
+      // glances cost level credit on scored drills — show that on the button so
+      // it's a considered choice, not a free peek
+      const glanceCost = def.scored ? ' −5' : '';
+      const glanceBtn = `<button class="btn ghost sm" data-act="glance" ${drill.glancesLeft() <= 0 ? 'disabled' : ''}>Glance${glanceCost}${drill.glanceCap ? ' · ' + drill.glancesLeft() : ''}</button>`;
       const undoBtn = `<button class="btn ghost sm" data-act="undo" ${surface.canUndo() ? '' : 'disabled'}>Undo</button>`;
       const eraseBtn = `<button class="btn ghost sm ${surface.erasing ? 'sel' : ''}" data-act="erase">Erase</button>`;
       const guidesBtn = `<button class="btn ghost sm ${surface.guides ? 'sel' : ''}" data-act="guides">Guides</button>`;
@@ -849,14 +854,24 @@
     }
     const glanceMsg = (!r.repeat && !r.recall && drill.glanceCount > 0)
       ? `<div class="tiny muted" style="margin-bottom:6px">${drill.glanceCount} glance${drill.glanceCount > 1 ? 's' : ''} used — level credit reduced by ${drill.glanceCount * 5}.</div>` : '';
+    // where this score sits vs the ~85% level-up threshold (faded: scored, genuine trials only)
+    const atCapNow = drill.def && drill.level >= (drill.def.maxLevel || 9);
+    const targetHint = (!r.repeat && !r.recall && !r.finisher && drill.def && drill.def.scored)
+      ? (atCapNow ? ' · holding at top level'
+         : r.score >= 85 ? ' · at the level-up mark ✓'
+         : ' · ~85% levels you up')
+      : '';
+    // make the value of a redraw come across when the drawing was genuinely off
+    const redrawNudge = (!r.repeat && !r.recall && drill.def && drill.def.scored && r.score < 70)
+      ? `<div class="tiny muted" style="margin:2px 0 6px">Off this time — a <b>Redraw</b> from memory now is where the correction sticks (Lecoq’s method).</div>` : '';
     let metricRows = '';
     if (drill.exKey === 'line' || drill.exKey === 'angles') {
       const ae = m.angleErrDeg != null ? m.angleErrDeg : m.meanAngleErrDeg;
       const le = m.lengthErrPct != null ? m.lengthErrPct : m.meanLengthErrPct;
       metricRows = `<div class="metricline"><span>Angle error</span><b>${ae > 0 ? '+' : ''}${ae}° ${ae > 0 ? '(CW)' : ae < 0 ? '(CCW)' : ''}</b></div>
         <div class="metricline"><span>Length error</span><b>${le > 0 ? '+' : ''}${le}% ${le > 0 ? '(long)' : le < 0 ? '(short)' : ''}</b></div>`;
-    } else if (drill.exKey === 'curve') {
-      metricRows = `<div class="metricline"><span>Curve match</span><b>${Math.round((m.iou || 0) * 100)}%</b></div>`;
+    } else if (drill.exKey === 'curve' || drill.exKey === 'gesture') {
+      metricRows = `<div class="metricline"><span>${drill.exKey === 'gesture' ? 'Line-of-action match' : 'Curve match'}</span><b>${Math.round((m.iou || 0) * 100)}%</b></div>`;
     } else {
       metricRows = `<div class="metricline"><span>Shape match</span><b>${Math.round((m.iou || 0) * 100)}%</b></div>
         <div class="metricline"><span>Proportion error</span><b>${m.aspectErrPct > 0 ? '+' : ''}${m.aspectErrPct}% ${m.aspectErrPct > 0 ? '(wide)' : m.aspectErrPct < 0 ? '(tall)' : ''}</b></div>`;
@@ -885,7 +900,7 @@
       : `<div id="d-detail"><button class="btn ghost sm block" data-showdetail="1" style="margin-bottom:6px">Show breakdown</button></div>`;
     result.innerHTML = `<div class="card resultcard">
       <div class="scorebadge ${scoreClass(r.score)}">${r.score}</div>
-      <div class="muted small" style="margin-bottom:8px">${r.recall ? 'retention accuracy' : 'accuracy'}</div>${pbMsg}${tutMsg}${modeMsg}${glanceMsg}
+      <div class="muted small" style="margin-bottom:8px">${r.recall ? 'retention accuracy' : 'accuracy'}${targetHint}</div>${pbMsg}${tutMsg}${modeMsg}${glanceMsg}${redrawNudge}
       ${estRow}${detail}${coachRow}${learnRow}${lvlMsg}</div>`;
     if (!r.showDetail) {
       const slot = $('#d-detail', result);
@@ -1244,8 +1259,9 @@
       if (ae != null) detail += `<div class="metricline"><span>Angle error</span><b>${ae > 0 ? '+' : ''}${ae}°</b></div>`;
       if (le != null) detail += `<div class="metricline"><span>Length error</span><b>${le > 0 ? '+' : ''}${le}%</b></div>`;
     } else if (m.iou != null) {
-      detail += `<div class="metricline"><span>Shape match</span><b>${Math.round(m.iou * 100)}%</b></div>
-        <div class="metricline"><span>Proportion error</span><b>${m.aspectErrPct > 0 ? '+' : ''}${m.aspectErrPct}%</b></div>`;
+      const label = a.type === 'gesture' ? 'Line-of-action match' : a.type === 'curve' ? 'Curve match' : 'Shape match';
+      detail += `<div class="metricline"><span>${label}</span><b>${Math.round(m.iou * 100)}%</b></div>`;
+      if (m.aspectErrPct != null) detail += `<div class="metricline"><span>Proportion error</span><b>${m.aspectErrPct > 0 ? '+' : ''}${m.aspectErrPct}%</b></div>`;
     }
     const sheet = openModal(`<div class="row between center"><h2>${esc(exName(a.type))}</h2>
       <span class="scorebadge ${scoreClass(a.score)}" style="font-size:30px">${a.score}${a.selfRated ? '*' : ''}</span></div>
@@ -1432,6 +1448,8 @@
           <div class="switch ${pencilOnly ? 'on' : ''}" id="sw-pencil" role="switch" aria-checked="${pencilOnly}" tabindex="0" aria-label="Apple Pencil only"><div class="knob"></div></div></div>
         <div class="setrow"><div><div>Ink weight</div><div class="small muted">stroke thickness</div></div>
           <div class="stepper"><button data-ink="-0.4">−</button><b id="inkv">${inkW.toFixed(1)}</b><button data-ink="0.4">+</button></div></div>
+        <div class="setrow"><div><div>Line smoothing</div><div class="small muted">steadies shaky strokes — raise it if lines come out wobbly</div></div>
+          <button class="btn ghost sm" id="smoothmode">${esc({ 0: 'Off', 0.3: 'Light', 0.5: 'Medium', 0.72: 'Strong' }[A.store.get('smooth', 0.5)] || 'Medium')}</button></div>
         <div class="setrow"><div><div>Sighting guides</div><div class="small muted">plumb line, horizon, thirds, angle ticks</div></div>
           <button class="btn ghost sm" id="guidesmode">${esc({ auto: 'Auto (fades)', on: 'Always on', off: 'Off' }[A.store.get('guidesMode', 'auto')])}</button></div>
         <div class="setrow"><div><div>Introduction</div><div class="small muted">replay the welcome guide</div></div>
@@ -1467,6 +1485,7 @@
     $$('[data-ink]', v).forEach((b) => b.onclick = () => { A.store.set('inkWidth', Math.max(1.2, Math.min(6, inkW + (+b.dataset.ink)))); surface.opts.baseWidth = A.store.get('inkWidth', 3.2); renderSettings(v); });
     $('#sw-pencil', v).onclick = () => { A.store.set('pencilOnly', !pencilOnly); surface.opts.pencilOnly = !pencilOnly; renderSettings(v); };
     $('#guidesmode', v).onclick = () => { const cur = A.store.get('guidesMode', 'auto'); const nxt = { auto: 'on', on: 'off', off: 'auto' }[cur]; A.store.set('guidesMode', nxt); renderSettings(v); };
+    $('#smoothmode', v).onclick = () => { const cur = A.store.get('smooth', 0.5); const nxt = { 0: 0.3, 0.3: 0.5, 0.5: 0.72, 0.72: 0 }[cur]; A.store.set('smooth', nxt == null ? 0.5 : nxt); surface.opts.smooth = A.store.get('smooth', 0.5); renderSettings(v); };
     $('#replayintro', v).onclick = () => showOnboarding();
     $('#export', v).onclick = exportBackup;
     $('#import', v).onchange = importBackup;

@@ -725,21 +725,41 @@ window.ATELIER_REFS = [{"id": "ws-lines-1", "title": "Straight lines — set 1",
      Like shape scoring but for an OPEN polyline — match the path of the curve
      (its bend/apex) rather than an enclosed area. Symmetric Chamfer, bbox-
      normalised, so size/position don't matter.                              */
+  // Similarity transform mapping P's endpoints onto Q's (translate+rotate+scale).
+  function endpointAlign(P, Q) {
+    const p0 = P[0], pn = P[P.length - 1], q0 = Q[0], qn = Q[Q.length - 1];
+    const vpx = pn[0] - p0[0], vpy = pn[1] - p0[1];
+    const vqx = qn[0] - q0[0], vqy = qn[1] - q0[1];
+    const lp = Math.hypot(vpx, vpy) || 1e-6, lq = Math.hypot(vqx, vqy);
+    const s = lq / lp, ang = Math.atan2(vqy, vqx) - Math.atan2(vpy, vpx);
+    const c = Math.cos(ang) * s, sn = Math.sin(ang) * s;
+    return P.map((p) => { const dx = p[0] - p0[0], dy = p[1] - p0[1]; return [q0[0] + c * dx - sn * dy, q0[1] + sn * dx + c * dy]; });
+  }
+  // Score an OPEN curve / line of action by how faithfully its BOW matches the
+  // target between the same endpoints. We align endpoints (so position, size and
+  // orientation don't matter — a memory drawing may be bigger or shifted), resolve
+  // draw direction by gross flow, then measure ordered point-to-point deviation
+  // normalized by the chord. This correctly penalises a too-straight line, a bow
+  // in the wrong place, or an opposite bend — which bbox+nearest-point scoring
+  // let slide (a straight line used to score ~97 against an S-curve).
   geom.scoreCurve = function (targetPolyline, userPts) {
     if (!userPts || userPts.length < 2 || extentOf(userPts) < MIN_EXTENT) {
       return { score: 0, iou: 0, metrics: { degenerate: true } };
     }
-    const T = geom.resample(targetPolyline, 80);
-    let U;
-    if (userPts.length < 40) U = geom.resample(userPts, 80);
-    else { const step = Math.ceil(userPts.length / 200); U = userPts.filter((_, i) => i % step === 0); }
-    const nt = geom.normalizeShape(T), nu = geom.normalizeShape(U);
-    const d1 = meanNearest(nu.pts, nt.pts), d2 = meanNearest(nt.pts, nu.pts);
-    let chamfer = (d1 + d2) / 2;
-    if (chamfer < 0.004) chamfer = 0;         // sampling noise — a perfect copy scores 100
-    const sim = Math.max(0, 1 - chamfer * 4.2);
-    const score = Math.round(Math.max(0, Math.min(100, 100 - chamfer * 340)));
-    return { score, iou: +sim.toFixed(3), metrics: { iou: +sim.toFixed(3), chamfer: +chamfer.toFixed(4) } };
+    const N = 64;
+    const T = geom.resample(targetPolyline, N);
+    let U = geom.resample(userPts, N);
+    const tvx = T[N - 1][0] - T[0][0], tvy = T[N - 1][1] - T[0][1];
+    const uvx = U[N - 1][0] - U[0][0], uvy = U[N - 1][1] - U[0][1];
+    if (tvx * uvx + tvy * uvy < 0) U = U.slice().reverse();   // drawn the other way → flip
+    const bb = bbox(T);
+    const scale = Math.max(Math.hypot(tvx, tvy), 0.45 * Math.hypot(bb.w, bb.h), 1e-3);
+    const A = endpointAlign(U, T);
+    let s = 0; for (let i = 0; i < N; i++) s += Math.hypot(A[i][0] - T[i][0], A[i][1] - T[i][1]);
+    const dev = s / N / scale;
+    const score = Math.round(Math.max(0, Math.min(100, 100 - dev * 500)));
+    const iou = +(score / 100).toFixed(3);   // 0-1 similarity for coach thresholds
+    return { score, iou, metrics: { iou, dev: +dev.toFixed(4) } };
   };
 
   /* ---- Convex hull (used by generators & for cleaning user polygons) ----- */
@@ -1316,7 +1336,9 @@ window.ATELIER_REFS = [{"id": "ws-lines-1", "title": "Straight lines — set 1",
     // alpha:false — we always paint an opaque paper background, so an opaque
     // buffer composites cheaper; desynchronized shaves a frame where supported.
     this.ctx = canvas.getContext('2d', { alpha: false, desynchronized: true });
-    this.opts = Object.assign({ pencilOnly: false, baseWidth: 3.2, ink: '#1a1a1a' }, opts || {});
+    // smooth: 0 = raw, higher = more stabilisation (eases hand jitter so straight
+    // and curved lines come out cleaner). 0.5 = a balanced default.
+    this.opts = Object.assign({ pencilOnly: false, baseWidth: 3.2, ink: '#1a1a1a', smooth: 0.5 }, opts || {});
     this.strokes = [];          // [{pts:[[x,y,p],...]}] in DESIGN coords
     this.target = null;         // generated target (design coords) or null
     this.showTarget = false;    // STUDY phase
@@ -1424,8 +1446,13 @@ window.ATELIER_REFS = [{"id": "ws-lines-1", "title": "Straight lines — set 1",
     // EMA: Pencil pressure is noisy at coalesced rates — smooth it so the
     // stroke width tapers instead of banding
     this._emaP = first ? pr : (0.35 * pr + 0.65 * this._emaP);
-    const d = this.toDesign([e.clientX - r.left, e.clientY - r.top]);
-    return [d[0], d[1], this._emaP];
+    const raw = this.toDesign([e.clientX - r.left, e.clientY - r.top]);
+    // positional stabiliser: ease the point toward the pen so hand jitter is
+    // damped (k=1 raw, lower k = smoother). Makes straight/curved lines cleaner.
+    const k = this._posK == null ? 1 : this._posK;
+    if (first || !this._emaPos) this._emaPos = [raw[0], raw[1]];
+    else { this._emaPos[0] += (raw[0] - this._emaPos[0]) * k; this._emaPos[1] += (raw[1] - this._emaPos[1]) * k; }
+    return [this._emaPos[0], this._emaPos[1], this._emaP];
   };
 
   Surface.prototype._design = function (e) {
@@ -1505,6 +1532,9 @@ window.ATELIER_REFS = [{"id": "ws-lines-1", "title": "Straight lines — set 1",
       this._activeId = e.pointerId;
       this._snapshot();
       this._drawing = true;
+      // stabiliser strength for this stroke (clamped so it can never fully freeze)
+      this._posK = 1 - Math.max(0, Math.min(0.8, this.opts.smooth == null ? 0.5 : this.opts.smooth));
+      this._emaPos = null;
       this._cur = { pts: [this._pt(e, true)] };
       this.strokes.push(this._cur);
       this._drawnIdx = 0;
@@ -3898,6 +3928,7 @@ window.ATELIER_REFS = [{"id": "ws-lines-1", "title": "Straight lines — set 1",
     const d = $('#drill'); d.classList.add('on');
     surface.opts.pencilOnly = A.store.get('pencilOnly', false);
     surface.opts.baseWidth = A.store.get('inkWidth', 3.2);
+    surface.opts.smooth = A.store.get('smooth', 0.5);
     setTimeout(() => { surface.resize(); drill.startRecall(att.type, att.target); }, 0);
   }
 
@@ -4213,7 +4244,7 @@ window.ATELIER_REFS = [{"id": "ws-lines-1", "title": "Straight lines — set 1",
       <div class="controls" id="d-controls"></div>
     </div>`);
     document.body.appendChild(d);
-    surface = new A.Surface($('#d-canvas', d), { pencilOnly: A.store.get('pencilOnly', false), baseWidth: A.store.get('inkWidth', 3.2) });
+    surface = new A.Surface($('#d-canvas', d), { pencilOnly: A.store.get('pencilOnly', false), baseWidth: A.store.get('inkWidth', 3.2), smooth: A.store.get('smooth', 0.5) });
     drill = new A.Drill(surface);
     drill.onState = updateDrill;
     drill.onTick = updateTimer;
@@ -4434,6 +4465,7 @@ window.ATELIER_REFS = [{"id": "ws-lines-1", "title": "Straight lines — set 1",
     const d = $('#drill'); d.classList.add('on');
     surface.opts.pencilOnly = A.store.get('pencilOnly', false);
     surface.opts.baseWidth = A.store.get('inkWidth', 3.2);
+    surface.opts.smooth = A.store.get('smooth', 0.5);
     // setTimeout (not rAF) so startup still runs if the first frame is throttled
     setTimeout(() => { surface.resize(); drill.startExercise(exKey, refItem, opts); }, 0);
   }
@@ -4542,7 +4574,10 @@ window.ATELIER_REFS = [{"id": "ws-lines-1", "title": "Straight lines — set 1",
     }
     else if (drill.phase === 'draw') {
       const flipBtn = !def.scored && drill.ref && drill.ref.img ? `<button class="btn ghost sm ${surface.ghostFlip ? 'sel' : ''}" data-act="flip">Flip ⟲</button>` : '';
-      const glanceBtn = `<button class="btn ghost sm" data-act="glance" ${drill.glancesLeft() <= 0 ? 'disabled' : ''}>Glance${drill.glanceCap ? ' ' + drill.glancesLeft() : ''}</button>`;
+      // glances cost level credit on scored drills — show that on the button so
+      // it's a considered choice, not a free peek
+      const glanceCost = def.scored ? ' −5' : '';
+      const glanceBtn = `<button class="btn ghost sm" data-act="glance" ${drill.glancesLeft() <= 0 ? 'disabled' : ''}>Glance${glanceCost}${drill.glanceCap ? ' · ' + drill.glancesLeft() : ''}</button>`;
       const undoBtn = `<button class="btn ghost sm" data-act="undo" ${surface.canUndo() ? '' : 'disabled'}>Undo</button>`;
       const eraseBtn = `<button class="btn ghost sm ${surface.erasing ? 'sel' : ''}" data-act="erase">Erase</button>`;
       const guidesBtn = `<button class="btn ghost sm ${surface.guides ? 'sel' : ''}" data-act="guides">Guides</button>`;
@@ -4601,14 +4636,24 @@ window.ATELIER_REFS = [{"id": "ws-lines-1", "title": "Straight lines — set 1",
     }
     const glanceMsg = (!r.repeat && !r.recall && drill.glanceCount > 0)
       ? `<div class="tiny muted" style="margin-bottom:6px">${drill.glanceCount} glance${drill.glanceCount > 1 ? 's' : ''} used — level credit reduced by ${drill.glanceCount * 5}.</div>` : '';
+    // where this score sits vs the ~85% level-up threshold (faded: scored, genuine trials only)
+    const atCapNow = drill.def && drill.level >= (drill.def.maxLevel || 9);
+    const targetHint = (!r.repeat && !r.recall && !r.finisher && drill.def && drill.def.scored)
+      ? (atCapNow ? ' · holding at top level'
+         : r.score >= 85 ? ' · at the level-up mark ✓'
+         : ' · ~85% levels you up')
+      : '';
+    // make the value of a redraw come across when the drawing was genuinely off
+    const redrawNudge = (!r.repeat && !r.recall && drill.def && drill.def.scored && r.score < 70)
+      ? `<div class="tiny muted" style="margin:2px 0 6px">Off this time — a <b>Redraw</b> from memory now is where the correction sticks (Lecoq’s method).</div>` : '';
     let metricRows = '';
     if (drill.exKey === 'line' || drill.exKey === 'angles') {
       const ae = m.angleErrDeg != null ? m.angleErrDeg : m.meanAngleErrDeg;
       const le = m.lengthErrPct != null ? m.lengthErrPct : m.meanLengthErrPct;
       metricRows = `<div class="metricline"><span>Angle error</span><b>${ae > 0 ? '+' : ''}${ae}° ${ae > 0 ? '(CW)' : ae < 0 ? '(CCW)' : ''}</b></div>
         <div class="metricline"><span>Length error</span><b>${le > 0 ? '+' : ''}${le}% ${le > 0 ? '(long)' : le < 0 ? '(short)' : ''}</b></div>`;
-    } else if (drill.exKey === 'curve') {
-      metricRows = `<div class="metricline"><span>Curve match</span><b>${Math.round((m.iou || 0) * 100)}%</b></div>`;
+    } else if (drill.exKey === 'curve' || drill.exKey === 'gesture') {
+      metricRows = `<div class="metricline"><span>${drill.exKey === 'gesture' ? 'Line-of-action match' : 'Curve match'}</span><b>${Math.round((m.iou || 0) * 100)}%</b></div>`;
     } else {
       metricRows = `<div class="metricline"><span>Shape match</span><b>${Math.round((m.iou || 0) * 100)}%</b></div>
         <div class="metricline"><span>Proportion error</span><b>${m.aspectErrPct > 0 ? '+' : ''}${m.aspectErrPct}% ${m.aspectErrPct > 0 ? '(wide)' : m.aspectErrPct < 0 ? '(tall)' : ''}</b></div>`;
@@ -4637,7 +4682,7 @@ window.ATELIER_REFS = [{"id": "ws-lines-1", "title": "Straight lines — set 1",
       : `<div id="d-detail"><button class="btn ghost sm block" data-showdetail="1" style="margin-bottom:6px">Show breakdown</button></div>`;
     result.innerHTML = `<div class="card resultcard">
       <div class="scorebadge ${scoreClass(r.score)}">${r.score}</div>
-      <div class="muted small" style="margin-bottom:8px">${r.recall ? 'retention accuracy' : 'accuracy'}</div>${pbMsg}${tutMsg}${modeMsg}${glanceMsg}
+      <div class="muted small" style="margin-bottom:8px">${r.recall ? 'retention accuracy' : 'accuracy'}${targetHint}</div>${pbMsg}${tutMsg}${modeMsg}${glanceMsg}${redrawNudge}
       ${estRow}${detail}${coachRow}${learnRow}${lvlMsg}</div>`;
     if (!r.showDetail) {
       const slot = $('#d-detail', result);
@@ -4996,8 +5041,9 @@ window.ATELIER_REFS = [{"id": "ws-lines-1", "title": "Straight lines — set 1",
       if (ae != null) detail += `<div class="metricline"><span>Angle error</span><b>${ae > 0 ? '+' : ''}${ae}°</b></div>`;
       if (le != null) detail += `<div class="metricline"><span>Length error</span><b>${le > 0 ? '+' : ''}${le}%</b></div>`;
     } else if (m.iou != null) {
-      detail += `<div class="metricline"><span>Shape match</span><b>${Math.round(m.iou * 100)}%</b></div>
-        <div class="metricline"><span>Proportion error</span><b>${m.aspectErrPct > 0 ? '+' : ''}${m.aspectErrPct}%</b></div>`;
+      const label = a.type === 'gesture' ? 'Line-of-action match' : a.type === 'curve' ? 'Curve match' : 'Shape match';
+      detail += `<div class="metricline"><span>${label}</span><b>${Math.round(m.iou * 100)}%</b></div>`;
+      if (m.aspectErrPct != null) detail += `<div class="metricline"><span>Proportion error</span><b>${m.aspectErrPct > 0 ? '+' : ''}${m.aspectErrPct}%</b></div>`;
     }
     const sheet = openModal(`<div class="row between center"><h2>${esc(exName(a.type))}</h2>
       <span class="scorebadge ${scoreClass(a.score)}" style="font-size:30px">${a.score}${a.selfRated ? '*' : ''}</span></div>
@@ -5184,6 +5230,8 @@ window.ATELIER_REFS = [{"id": "ws-lines-1", "title": "Straight lines — set 1",
           <div class="switch ${pencilOnly ? 'on' : ''}" id="sw-pencil" role="switch" aria-checked="${pencilOnly}" tabindex="0" aria-label="Apple Pencil only"><div class="knob"></div></div></div>
         <div class="setrow"><div><div>Ink weight</div><div class="small muted">stroke thickness</div></div>
           <div class="stepper"><button data-ink="-0.4">−</button><b id="inkv">${inkW.toFixed(1)}</b><button data-ink="0.4">+</button></div></div>
+        <div class="setrow"><div><div>Line smoothing</div><div class="small muted">steadies shaky strokes — raise it if lines come out wobbly</div></div>
+          <button class="btn ghost sm" id="smoothmode">${esc({ 0: 'Off', 0.3: 'Light', 0.5: 'Medium', 0.72: 'Strong' }[A.store.get('smooth', 0.5)] || 'Medium')}</button></div>
         <div class="setrow"><div><div>Sighting guides</div><div class="small muted">plumb line, horizon, thirds, angle ticks</div></div>
           <button class="btn ghost sm" id="guidesmode">${esc({ auto: 'Auto (fades)', on: 'Always on', off: 'Off' }[A.store.get('guidesMode', 'auto')])}</button></div>
         <div class="setrow"><div><div>Introduction</div><div class="small muted">replay the welcome guide</div></div>
@@ -5219,6 +5267,7 @@ window.ATELIER_REFS = [{"id": "ws-lines-1", "title": "Straight lines — set 1",
     $$('[data-ink]', v).forEach((b) => b.onclick = () => { A.store.set('inkWidth', Math.max(1.2, Math.min(6, inkW + (+b.dataset.ink)))); surface.opts.baseWidth = A.store.get('inkWidth', 3.2); renderSettings(v); });
     $('#sw-pencil', v).onclick = () => { A.store.set('pencilOnly', !pencilOnly); surface.opts.pencilOnly = !pencilOnly; renderSettings(v); };
     $('#guidesmode', v).onclick = () => { const cur = A.store.get('guidesMode', 'auto'); const nxt = { auto: 'on', on: 'off', off: 'auto' }[cur]; A.store.set('guidesMode', nxt); renderSettings(v); };
+    $('#smoothmode', v).onclick = () => { const cur = A.store.get('smooth', 0.5); const nxt = { 0: 0.3, 0.3: 0.5, 0.5: 0.72, 0.72: 0 }[cur]; A.store.set('smooth', nxt == null ? 0.5 : nxt); surface.opts.smooth = A.store.get('smooth', 0.5); renderSettings(v); };
     $('#replayintro', v).onclick = () => showOnboarding();
     $('#export', v).onclick = exportBackup;
     $('#import', v).onchange = importBackup;
@@ -5334,8 +5383,8 @@ window.ATELIER_REFS = [{"id": "ws-lines-1", "title": "Straight lines — set 1",
   'use strict';
   // Stamped by build/build.js: A.VERSION from build/version.json, A.BUILD from
   // the build clock (YYMMDD.HHMM). These literals are only the un-built dev fallback.
-  A.VERSION = '1.5.0';
-  A.BUILD = '260705.1456';
+  A.VERSION = '1.6.0';
+  A.BUILD = '260705.2306';
   function boot() {
     try { A.ui.init(); }
     catch (e) {

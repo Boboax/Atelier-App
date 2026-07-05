@@ -5,8 +5,8 @@
   'use strict';
   // Stamped by build/build.js: A.VERSION from build/version.json, A.BUILD from
   // the build clock (YYMMDD.HHMM). These literals are only the un-built dev fallback.
-  A.VERSION = '1.5.0';
-  A.BUILD = '260705.1456';
+  A.VERSION = '1.6.0';
+  A.BUILD = '260705.2306';
   function boot() {
     try { A.ui.init(); }
     catch (e) {

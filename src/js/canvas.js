@@ -29,7 +29,9 @@
     // alpha:false — we always paint an opaque paper background, so an opaque
     // buffer composites cheaper; desynchronized shaves a frame where supported.
     this.ctx = canvas.getContext('2d', { alpha: false, desynchronized: true });
-    this.opts = Object.assign({ pencilOnly: false, baseWidth: 3.2, ink: '#1a1a1a' }, opts || {});
+    // smooth: 0 = raw, higher = more stabilisation (eases hand jitter so straight
+    // and curved lines come out cleaner). 0.5 = a balanced default.
+    this.opts = Object.assign({ pencilOnly: false, baseWidth: 3.2, ink: '#1a1a1a', smooth: 0.5 }, opts || {});
     this.strokes = [];          // [{pts:[[x,y,p],...]}] in DESIGN coords
     this.target = null;         // generated target (design coords) or null
     this.showTarget = false;    // STUDY phase
@@ -137,8 +139,13 @@
     // EMA: Pencil pressure is noisy at coalesced rates — smooth it so the
     // stroke width tapers instead of banding
     this._emaP = first ? pr : (0.35 * pr + 0.65 * this._emaP);
-    const d = this.toDesign([e.clientX - r.left, e.clientY - r.top]);
-    return [d[0], d[1], this._emaP];
+    const raw = this.toDesign([e.clientX - r.left, e.clientY - r.top]);
+    // positional stabiliser: ease the point toward the pen so hand jitter is
+    // damped (k=1 raw, lower k = smoother). Makes straight/curved lines cleaner.
+    const k = this._posK == null ? 1 : this._posK;
+    if (first || !this._emaPos) this._emaPos = [raw[0], raw[1]];
+    else { this._emaPos[0] += (raw[0] - this._emaPos[0]) * k; this._emaPos[1] += (raw[1] - this._emaPos[1]) * k; }
+    return [this._emaPos[0], this._emaPos[1], this._emaP];
   };
 
   Surface.prototype._design = function (e) {
@@ -218,6 +225,9 @@
       this._activeId = e.pointerId;
       this._snapshot();
       this._drawing = true;
+      // stabiliser strength for this stroke (clamped so it can never fully freeze)
+      this._posK = 1 - Math.max(0, Math.min(0.8, this.opts.smooth == null ? 0.5 : this.opts.smooth));
+      this._emaPos = null;
       this._cur = { pts: [this._pt(e, true)] };
       this.strokes.push(this._cur);
       this._drawnIdx = 0;

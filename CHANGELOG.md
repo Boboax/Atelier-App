@@ -19,6 +19,16 @@ No feature reaches `main` without a version bump.
 
 ---
 
+## 1.6.0 — Scoring calibration, drawing feel & clarity
+
+**Fixed**
+- Curve & gesture scoring was far too generous — a straight line scored ~97 against an S-curve, an opposite bend ~86. Rewrote it to align endpoints and measure the actual bow along the path (position/size/direction-invariant), so scores now match how the eye reads a line: a close copy ~95, a loose one ~85, a too-straight line ~75, an opposite bend ~50.
+- Gesture reveal no longer shows "Proportion error undefined%" — it now reports "Line-of-action match" (the shape-metric display path never applied to a line).
+
+**New / improved**
+- **Line smoothing** — a positional stabiliser eases hand jitter so straight and curved strokes come out cleaner on the iPad. Adjustable in Settings (Off / Light / Medium / Strong; Medium default).
+- Reveal now shows where your score sits vs the ~85% level-up mark, flags the level-credit cost of glances **on the Glance button itself** (−5), and — when a drawing was genuinely off — prompts a Redraw and explains why it matters (Lecoq's correct-and-repeat).
+
 ## 1.5.0 — Gesture, teaching & real subjects
 
 **New**
