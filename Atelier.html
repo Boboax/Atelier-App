@@ -241,6 +241,8 @@ button{font-family:inherit;touch-action:manipulation}
   display:flex;gap:10px;justify-content:center;align-items:center;
   background:linear-gradient(rgba(255,255,255,0),#fff 40%)}
 #drill .controls .btn{box-shadow:var(--shadow)}
+/* pinch-zoom reset chip: floats above the drill controls */
+#d-zoomreset{position:absolute;right:14px;bottom:calc(env(safe-area-inset-bottom) + 96px);z-index:7;box-shadow:var(--shadow)}
 .closeX{position:absolute;top:calc(env(safe-area-inset-top) + 8px);right:10px;z-index:6;
   background:rgba(0,0,0,.05);border:0;border-radius:50%;width:44px;height:44px;font-size:18px;cursor:pointer;color:var(--ink)}
 @media (prefers-color-scheme: dark){.closeX{background:rgba(255,255,255,.08)}}
@@ -776,6 +778,29 @@ window.ATELIER_REFS = [{"id": "ws-lines-1", "title": "Straight lines — set 1",
     return { score, iou, metrics: { iou, dev: +dev.toFixed(4) } };
   };
 
+  /* ---- FIXED-POSITION curve scoring ---------------------------------------
+     Like scoreCurve but WITHOUT endpoint alignment: where the curve sits
+     matters. Used for the terminator drill — drawing the shadow boundary on
+     the wrong part of the form is a miss, even if the bow shape is right.
+     Deviation is normalised by scaleRef (e.g. the form's radius).            */
+  geom.scoreCurveFixed = function (targetPolyline, userPts, scaleRef) {
+    if (!userPts || userPts.length < 2 || extentOf(userPts) < MIN_EXTENT) {
+      return { score: 0, iou: 0, metrics: { degenerate: true } };
+    }
+    const N = 64;
+    const T = geom.resample(targetPolyline, N);
+    let U = geom.resample(userPts, N);
+    const tvx = T[N - 1][0] - T[0][0], tvy = T[N - 1][1] - T[0][1];
+    const uvx = U[N - 1][0] - U[0][0], uvy = U[N - 1][1] - U[0][1];
+    if (tvx * uvx + tvy * uvy < 0) U = U.slice().reverse();   // drawn the other way → flip
+    const scale = Math.max(scaleRef || 0, 1e-3);
+    let s = 0; for (let i = 0; i < N; i++) s += Math.hypot(U[i][0] - T[i][0], U[i][1] - T[i][1]);
+    const dev = s / N / scale;
+    const score = Math.round(Math.max(0, Math.min(100, 100 - dev * 260)));
+    const iou = +(score / 100).toFixed(3);
+    return { score, iou, metrics: { iou, dev: +dev.toFixed(4) } };
+  };
+
   /* ---- Convex hull (used by generators & for cleaning user polygons) ----- */
   geom.convexHull = function (points) {
     const pts = points.slice().sort((a, b) => a[0] - b[0] || a[1] - b[1]);
@@ -1301,6 +1326,50 @@ window.ATELIER_REFS = [{"id": "ws-lines-1", "title": "Straight lines — set 1",
     return placeGesture(pool[Math.floor(Math.random() * pool.length)]);
   };
 
+  /* ---- terminator (light & shadow): the classical value drill --------------
+     A simple lit form (sphere → egg → cylinder) with a light direction; the
+     ground truth is the TERMINATOR — the boundary where light turns to shadow.
+     During study the form renders shaded with a visible core-shadow edge; the
+     learner then draws that boundary from memory ON the bare contour. Scored
+     position-fixed (scoreCurveFixed): the right bow in the wrong place is a
+     miss. Levels: sphere with near-flat light → egg → stronger bow (light
+     tilted toward the viewer) → rotated egg → cylinder.                     */
+  gen.shade = function (level) {
+    const type = level <= 2 ? 'sphere' : level <= 4 ? 'egg' : (level >= 7 && Math.random() < 0.5) ? 'cyl' : 'egg';
+    const cx = rnd(0.44, 0.56), cy = rnd(0.44, 0.56);
+    let rx, ry, rot = 0;
+    if (type === 'sphere') { rx = ry = rnd(0.24, 0.3); }
+    else if (type === 'egg') { rx = rnd(0.2, 0.26); ry = rx * rnd(1.2, 1.45); rot = level >= 5 ? rnd(-0.5, 0.5) : 0; }
+    else { rx = rnd(0.11, 0.15); ry = rx * rnd(2.2, 2.8); rot = rnd(-0.35, 0.35); }
+    // light angle (unit-circle space) — avoid near-vertical-from-top ambiguity a little
+    const phi = rnd(0, Math.PI * 2);
+    // bow of the terminator: light tilted toward the viewer → stronger curve
+    const k = level <= 2 ? rnd(0.12, 0.2) : level <= 5 ? rnd(0.15, 0.3) : rnd(0.2, 0.42);
+    const co = Math.cos(rot), si = Math.sin(rot);
+    const toDesign = (ux, uy) => {   // unit circle → ellipse → rotate → place
+      const ex = ux * rx, ey = uy * ry;
+      return [cx + ex * co - ey * si, cy + ex * si + ey * co];
+    };
+    const u = [Math.cos(phi), Math.sin(phi)];            // toward the light
+    const v = [-u[1], u[0]];                              // ⊥ light
+    const term = [];
+    for (let i = 0; i <= 32; i++) {
+      const t = -Math.PI / 2 + (i / 32) * Math.PI;        // pole to pole
+      const px = Math.sin(t) * v[0] + Math.cos(t) * k * u[0];
+      const py = Math.sin(t) * v[1] + Math.cos(t) * k * u[1];
+      term.push(toDesign(px, py));
+    }
+    const contour = [];
+    for (let i = 0; i < 48; i++) { const a = (i / 48) * Math.PI * 2; contour.push(toDesign(Math.cos(a), Math.sin(a))); }
+    // shadow region polygon: terminator (−v pole → +v pole) + the silhouette arc
+    // back around the dark side (through −u) — used for the study-phase fill
+    const shadow = term.slice();
+    const av = Math.atan2(v[1], v[0]);
+    for (let i = 1; i < 32; i++) { const a = av + (i / 32) * Math.PI; shadow.push(toDesign(Math.cos(a), Math.sin(a))); }
+    return { kind: 'shade', polyline: term, contour, shadow,
+             form: { type, cx, cy, rx, ry, rot }, light: { x: u[0], y: u[1], k } };
+  };
+
   // Dispatch by exercise key.
   gen.make = function (exKey, level) {
     switch (exKey) {
@@ -1310,6 +1379,7 @@ window.ATELIER_REFS = [{"id": "ws-lines-1", "title": "Straight lines — set 1",
       case 'polygon': return gen.polygon(level);
       case 'envelope': return gen.envelope(level);
       case 'gesture': return gen.gesture(level);
+      case 'shade': return gen.shade(level);
       default: return gen.line(level);
     }
   };
@@ -1370,6 +1440,10 @@ window.ATELIER_REFS = [{"id": "ws-lines-1", "title": "Straight lines — set 1",
     this.measures = [];         // [{a:[x,y], b:[x,y]}] in design coords; measures[0] = the unit
     this._curMeasure = null;
     this.locked = false;        // set by the drill: no marks during STUDY/ESTIMATE
+    this.view = { z: 1, tx: 0, ty: 0 };   // pinch zoom/pan (two-finger touch)
+    this.onViewChange = null;   // notified when zoom starts/ends (UI reset button)
+    this._touchPts = new Map(); // live touch positions (for pinch), independent of drawing
+    this._pinch = null;
     this._penSeen = 0;
     this._drawing = false;
     this._cur = null;
@@ -1452,15 +1526,22 @@ window.ATELIER_REFS = [{"id": "ws-lines-1", "title": "Straight lines — set 1",
     try { this.canvas.setPointerCapture && this.canvas.setPointerCapture(e.pointerId); } catch (_) {}
   };
 
+  // client coords → CONTENT CSS px (inverting the pinch view transform)
+  Surface.prototype._content = function (clientX, clientY) {
+    const r = this._rect || this.canvas.getBoundingClientRect();
+    const v = this.view;
+    return [(clientX - r.left - v.tx) / v.z, (clientY - r.top - v.ty) / v.z];
+  };
+
   // event → [designX, designY, smoothedPressure]
   Surface.prototype._pt = function (e, first) {
-    const r = this._rect || this.canvas.getBoundingClientRect();
     let pr = e.pressure;
     if (e.pointerType !== 'pen' || pr === 0 || pr == null) pr = 0.5; // fallback
     // EMA: Pencil pressure is noisy at coalesced rates — smooth it so the
     // stroke width tapers instead of banding
     this._emaP = first ? pr : (0.35 * pr + 0.65 * this._emaP);
-    const raw = this.toDesign([e.clientX - r.left, e.clientY - r.top]);
+    const c = this._content(e.clientX, e.clientY);
+    const raw = this.toDesign(c);
     // positional stabiliser: ease the point toward the pen so hand jitter is
     // damped (k=1 raw, lower k = smoother). Makes straight/curved lines cleaner.
     const k = this._posK == null ? 1 : this._posK;
@@ -1470,8 +1551,53 @@ window.ATELIER_REFS = [{"id": "ws-lines-1", "title": "Straight lines — set 1",
   };
 
   Surface.prototype._design = function (e) {
+    return this.toDesign(this._content(e.clientX, e.clientY));
+  };
+
+  /* ---- pinch zoom & pan (two-finger touch; pen keeps drawing) ------------ */
+  Surface.prototype._clampView = function () {
+    const v = this.view;
+    v.z = Math.max(1, Math.min(6, v.z));
+    v.tx = Math.max(this.cssW * (1 - v.z), Math.min(0, v.tx));
+    v.ty = Math.max(this.cssH * (1 - v.z), Math.min(0, v.ty));
+    if (v.z < 1.02) { v.z = 1; v.tx = 0; v.ty = 0; }
+  };
+  Surface.prototype.resetView = function () {
+    this.view = { z: 1, tx: 0, ty: 0 };
+    this.redraw();
+    if (this.onViewChange) this.onViewChange(1);
+  };
+  Surface.prototype._maybeStartPinch = function () {
+    if (this._touchPts.size !== 2) return;
+    // a young accidental touch stroke gives way to the pinch (Procreate-style)
+    if (this._drawing && this._cur && this._cur.pts.length < 12) {
+      this.strokes.pop(); this._undoStack.pop();
+      this._drawing = false; this._cur = null; this._activeId = null; this._predicted = null;
+    }
+    if (this._drawing) return;                 // pen stroke in progress — pen wins
+    const pts = Array.from(this._touchPts.values());
     const r = this._rect || this.canvas.getBoundingClientRect();
-    return this.toDesign([e.clientX - r.left, e.clientY - r.top]);
+    this._pinch = {
+      d0: Math.max(8, Math.hypot(pts[0][0] - pts[1][0], pts[0][1] - pts[1][1])),
+      z0: this.view.z, tx0: this.view.tx, ty0: this.view.ty,
+      m0: [(pts[0][0] + pts[1][0]) / 2 - r.left, (pts[0][1] + pts[1][1]) / 2 - r.top]
+    };
+  };
+  Surface.prototype._doPinch = function () {
+    const p = this._pinch; if (!p || this._touchPts.size < 2) return;
+    const pts = Array.from(this._touchPts.values());
+    const r = this._rect || this.canvas.getBoundingClientRect();
+    const d = Math.max(8, Math.hypot(pts[0][0] - pts[1][0], pts[0][1] - pts[1][1]));
+    const m = [(pts[0][0] + pts[1][0]) / 2 - r.left, (pts[0][1] + pts[1][1]) / 2 - r.top];
+    const z = p.z0 * d / p.d0;
+    // keep the content point that started under the fingers anchored to them
+    const cx = (p.m0[0] - p.tx0) / p.z0, cy = (p.m0[1] - p.ty0) / p.z0;
+    this.view.z = z;
+    this.view.tx = m[0] - cx * this.view.z;
+    this.view.ty = m[1] - cy * this.view.z;
+    this._clampView();
+    this._scheduleFull();
+    if (this.onViewChange) this.onViewChange(this.view.z);
   };
   // displayed rect of the current ghost image, in design coords (0..1 of the box)
   Surface.prototype.ghostRectDesign = function () {
@@ -1495,7 +1621,7 @@ window.ATELIER_REFS = [{"id": "ws-lines-1", "title": "Straight lines — set 1",
 
   // remove stroke points within the eraser radius, splitting strokes as needed
   Surface.prototype._eraseAt = function (p) {
-    const R = this.eraseR / (this.box.s || 1), R2 = R * R, out = [];
+    const R = this.eraseR / ((this.box.s || 1) * (this.view.z || 1)), R2 = R * R, out = [];
     for (const s of this.strokes) {
       let run = [];
       for (const pt of s.pts) {
@@ -1516,6 +1642,12 @@ window.ATELIER_REFS = [{"id": "ws-lines-1", "title": "Straight lines — set 1",
   Surface.prototype.clearMeasures = function () { this.measures = []; this._curMeasure = null; this.redraw(); };
 
   Surface.prototype._down = function (e) {
+    // pinch tracking is independent of drawing/palm logic: any second finger
+    // starts a zoom, even in pencil-only mode (touch never inks there anyway)
+    if (e.pointerType === 'touch') {
+      this._touchPts.set(e.pointerId, [e.clientX, e.clientY]);
+      if (this._touchPts.size === 2) { e.preventDefault(); this._maybeStartPinch(); if (this._pinch) return; }
+    }
     if (this._activeId != null) return;       // one pointer owns the surface at a time
     if (!this._drawing && !this._cropping) this._measure();   // refresh rect (layout may have settled)
     if (this.measureMode) {
@@ -1561,6 +1693,10 @@ window.ATELIER_REFS = [{"id": "ws-lines-1", "title": "Straight lines — set 1",
 
   Surface.prototype._move = function (e) {
     if (e.pointerType === 'pen') this._penSeen = performance.now();  // palm guard mid-stroke
+    if (e.pointerType === 'touch' && this._touchPts.has(e.pointerId)) {
+      this._touchPts.set(e.pointerId, [e.clientX, e.clientY]);
+      if (this._pinch) { e.preventDefault(); this._doPinch(); return; }
+    }
     if (this._activeId != null && e.pointerId !== this._activeId) return;
     if (this._measuring) { e.preventDefault(); this._curMeasure.b = this._design(e); this._scheduleFull(); return; }
     if (this._cropping) { e.preventDefault(); this.cropRect[1] = this._design(e); this._scheduleFull(); return; }
@@ -1590,6 +1726,15 @@ window.ATELIER_REFS = [{"id": "ws-lines-1", "title": "Straight lines — set 1",
   };
 
   Surface.prototype._up = function (e, cancelled) {
+    if (e && e.pointerType === 'touch') {
+      this._touchPts.delete(e.pointerId);
+      if (this._pinch && this._touchPts.size < 2) {
+        this._pinch = null;
+        this._clampView(); this._scheduleFull();
+        if (this.onViewChange) this.onViewChange(this.view.z);
+        return;
+      }
+    }
     if (this._activeId != null && e && e.pointerId != null && e.pointerId !== this._activeId) return;
     // release pointer capture so the NEXT tap reaches the buttons (not the canvas) —
     // otherwise the first tap after a stroke is swallowed and you must tap twice.
@@ -1643,7 +1788,9 @@ window.ATELIER_REFS = [{"id": "ws-lines-1", "title": "Straight lines — set 1",
 
   Surface.prototype._setStrokeTransform = function (ctx) {
     const r = this._rect || this.canvas.getBoundingClientRect();
-    ctx.setTransform(this.canvas.width / (r.width || 1), 0, 0, this.canvas.height / (r.height || 1), 0, 0);
+    const sx = this.canvas.width / (r.width || 1), sy = this.canvas.height / (r.height || 1);
+    const v = this.view;   // pinch zoom/pan composes on top of the DPR mapping
+    ctx.setTransform(sx * v.z, 0, 0, sy * v.z, sx * v.tx, sy * v.ty);
   };
   Surface.prototype._segWidth = function (a, b) {
     const p = ((a[2] == null ? 0.5 : a[2]) + (b[2] == null ? 0.5 : b[2])) / 2;
@@ -1686,6 +1833,8 @@ window.ATELIER_REFS = [{"id": "ws-lines-1", "title": "Straight lines — set 1",
     this.erasing = false; this._erasingActive = false; this._erasePt = null;
     this.measureMode = false; this.measures = []; this._curMeasure = null; this._measuring = false;
     this._undoStack = [];
+    this.view = { z: 1, tx: 0, ty: 0 }; this._pinch = null;
+    if (this.onViewChange) this.onViewChange(1);
     this.redraw();
   };
   Surface.prototype.setTarget = function (t) { this.target = t; this.redraw(); };
@@ -1726,6 +1875,13 @@ window.ATELIER_REFS = [{"id": "ws-lines-1", "title": "Straight lines — set 1",
         const a = this.toPx(ln[0]), b = this.toPx(ln[1]);
         ctx.beginPath(); ctx.moveTo(a[0], a[1]); ctx.lineTo(b[0], b[1]); ctx.stroke();
       }
+    } else if (t.kind === 'shade') {
+      // reveal: the true terminator over the user's marks (contour is drawn
+      // separately in redraw so it's visible in every phase)
+      ctx.beginPath();
+      const s0 = this.toPx(t.polyline[0]); ctx.moveTo(s0[0], s0[1]);
+      for (let i = 1; i < t.polyline.length; i++) { const p = this.toPx(t.polyline[i]); ctx.lineTo(p[0], p[1]); }
+      ctx.stroke();
     } else if (t.kind === 'gesture') {
       // head + mass ovals only during STUDY (they make it read as a figure);
       // the line of action is the thing memorised, redrawn and scored
@@ -1778,6 +1934,39 @@ window.ATELIER_REFS = [{"id": "ws-lines-1", "title": "Straight lines — set 1",
         ctx.moveTo(a[0], a[1]); ctx.lineTo(b[0], b[1]); ctx.stroke();
       }
     }
+    ctx.restore();
+  };
+
+  // the terminator drill's form: bare contour in every phase (you place the
+  // shadow ON the form); during STUDY, a lit rendering with a clear core-shadow
+  // edge — the thing to memorise.
+  Surface.prototype._drawShadeForm = function (ctx, study) {
+    const t = this.target; if (!t || t.kind !== 'shade') return;
+    const path = (pts, close) => {
+      ctx.beginPath();
+      const p0 = this.toPx(pts[0]); ctx.moveTo(p0[0], p0[1]);
+      for (let i = 1; i < pts.length; i++) { const p = this.toPx(pts[i]); ctx.lineTo(p[0], p[1]); }
+      if (close) ctx.closePath();
+    };
+    ctx.save();
+    if (study) {
+      const f = t.form, L = t.light;
+      const c = this.toPx([f.cx, f.cy]);
+      const R = Math.max(f.rx, f.ry) * this.box.s;
+      // lit-side highlight: offset radial gradient inside the silhouette
+      path(t.contour, true); ctx.save(); ctx.clip();
+      const hx = c[0] + L.x * R * 0.45, hy = c[1] + L.y * R * 0.45;
+      const grad = ctx.createRadialGradient(hx, hy, R * 0.08, c[0], c[1], R * 1.25);
+      grad.addColorStop(0, '#ffffff'); grad.addColorStop(0.55, '#e9e2d4'); grad.addColorStop(1, '#c9c1b0');
+      ctx.fillStyle = grad; ctx.fillRect(c[0] - R * 2, c[1] - R * 2, R * 4, R * 4);
+      // core shadow beyond the terminator — the boundary being memorised
+      path(t.shadow, true); ctx.fillStyle = 'rgba(64,54,42,0.34)'; ctx.fill();
+      ctx.restore();
+    }
+    // the bare form contour (all phases)
+    path(t.contour, true);
+    ctx.strokeStyle = study ? 'rgba(0,0,0,0.5)' : 'rgba(0,0,0,0.35)';
+    ctx.lineWidth = 1.6; ctx.stroke();
     ctx.restore();
   };
 
@@ -1874,8 +2063,11 @@ window.ATELIER_REFS = [{"id": "ws-lines-1", "title": "Straight lines — set 1",
     // reference ghost (study or self-check)
     if (this.ghost) this._drawGhost(ctx, this.ghostStudy ? 1 : this.ghost.opacity);
 
-    // generated target during STUDY (worksheet-grey)
-    if (this.showTarget && this.target) {
+    // terminator drill: the form itself is always visible (shaded during study)
+    if (this.target && this.target.kind === 'shade') {
+      this._drawShadeForm(ctx, this.showTarget);
+    } else if (this.showTarget && this.target) {
+      // generated target during STUDY (worksheet-grey)
       this._drawTargetGeom(ctx, 'rgba(0,0,0,0.55)', 'rgba(0,0,0,0.10)', 2.5);
     }
 
@@ -1891,7 +2083,7 @@ window.ATELIER_REFS = [{"id": "ws-lines-1", "title": "Straight lines — set 1",
     if (this.erasing && this._erasePt) {
       const c = this.toPx(this._erasePt);
       ctx.save(); ctx.strokeStyle = 'rgba(0,0,0,0.4)'; ctx.lineWidth = 1.5;
-      ctx.beginPath(); ctx.arc(c[0], c[1], this.eraseR, 0, Math.PI * 2); ctx.stroke(); ctx.restore();
+      ctx.beginPath(); ctx.arc(c[0], c[1], this.eraseR / (this.view.z || 1), 0, Math.PI * 2); ctx.stroke(); ctx.restore();
     }
     // comparative-measurement calipers (above marks, below crop UI)
     if (this.measures.length || this._curMeasure) this._drawMeasures(ctx);
@@ -1953,6 +2145,9 @@ window.ATELIER_REFS = [{"id": "ws-lines-1", "title": "Straight lines — set 1",
     { key: 'gesture', name: 'Gesture (Line of Action)', module: 3, scored: true,
       blurb: 'Capture a pose’s line of action from memory — one flowing line through the whole figure.',
       study: (l) => clamp(Math.round(10 - l), 2, 10), draw: 20, maxLevel: 9 },
+    { key: 'shade', name: 'Terminator (Light & Shadow)', module: 4, scored: true,
+      blurb: 'Study a lit form, then draw the shadow line — where light turns to dark — from memory, on the bare form.',
+      study: (l) => clamp(Math.round(14 - l), 3, 14), draw: 25, maxLevel: 9 },
     { key: 'contour', name: 'Contour (Edges)', module: 4, scored: false, refCat: 'any',
       blurb: 'Trace one edge slowly from memory — eyes on the form, building edge-perception.',
       study: () => 40, draw: null, maxLevel: 1 },
@@ -1962,8 +2157,8 @@ window.ATELIER_REFS = [{"id": "ws-lines-1", "title": "Straight lines — set 1",
     { key: 'bargue', name: 'Bargue Block-In', module: 4, scored: false, refCat: 'bargue',
       blurb: 'Study a plate’s block-in, draw the envelope from memory, then ghost it back.',
       study: () => 45, draw: null, maxLevel: 1 },
-    { key: 'value', name: 'Value / Terminator', module: 4, scored: false, refCat: 'any',
-      blurb: 'The lit-egg drill: memorise the shadow line, then draw it from memory.',
+    { key: 'value', name: 'Value study (photo)', module: 4, scored: false, refCat: 'any',
+      blurb: 'The same shadow-line drill on a photo of a real lit object — import your own egg/cast photos.',
       study: () => 60, draw: null, maxLevel: 1 },
     { key: 'master', name: 'Master Copy', module: 4, scored: false, refCat: 'any',
       blurb: 'Lecoq’s Louvre exercise — study a whole image, draw it from memory.',
@@ -1986,7 +2181,7 @@ window.ATELIER_REFS = [{"id": "ws-lines-1", "title": "Straight lines — set 1",
       { n: 1, name: 'Lines, Angles & Curves', note: 'Length, angle and the bow of a curve — the foundation of all measurement.' },
       { n: 2, name: 'Polygons', note: 'Closed shapes and internal proportion.' },
       { n: 3, name: 'Envelopes & Gesture', note: 'Organic form blocked in with straight lines, and the figure’s line of action.' },
-      { n: 4, name: 'Real Subjects', note: 'Negative space, Bargue plates, value, master copies.' }
+      { n: 4, name: 'Value & Real Subjects', note: 'Light and shadow, negative space, Bargue plates, master copies.' }
     ],
 
     _state() { return A.store.get('curriculum', {}); },
@@ -2196,6 +2391,10 @@ window.ATELIER_REFS = [{"id": "ws-lines-1", "title": "Straight lines — set 1",
         if (m.iou != null && m.iou < 0.6) return 'Follow the bend more closely — pin the start, end and apex (furthest bow) first.';
         return 'Nice curve — smooth and close to the path.';
       }
+      if (exKey === 'shade') {
+        if (m.iou != null && m.iou < 0.7) return 'Find where the form turns from the light — place the boundary first, then follow its bow.';
+        return 'Well placed — you saw where the form turns away from the light.';
+      }
       if (exKey === 'gesture') {
         if (m.iou != null && m.iou < 0.7) return 'Find the main sweep — one long line head to foot. Push the curve rather than tracing the outline.';
         return 'Strong line of action — you caught the pose’s rhythm.';
@@ -2247,6 +2446,9 @@ window.ATELIER_REFS = [{"id": "ws-lines-1", "title": "Straight lines — set 1",
       apex: { icon: '⌒', title: 'Pin the anchors, then the bow',
         why: 'A curve is fully described by its two endpoints and its apex — the furthest point it departs from the straight line between them. Fix those three and the curve almost draws itself.',
         how: 'Before the sweep, mark start, end, and where (and how far) it bows out. Draw through those points in one unhurried stroke rather than feeling your way along the edge.' },
+      terminator: { icon: '◑', title: 'The terminator follows the form',
+        why: 'The shadow line isn’t an outline you copy — it’s where the surface turns away from the light. Its position is set by the light direction; its curve is set by the form. Misplacing it flattens the volume instantly.',
+        how: 'First ask: where does the light come from? The terminator sits roughly a quarter-turn around from it. Then let its bow follow the form’s roundness — straighter on a cylinder, fuller on a sphere. Place, then curve.' },
       loa: { icon: '⟋', title: 'One line through the whole figure',
         why: 'A pose reads as a single rhythmic line — the line of action — before any anatomy. Catching that flow first is what makes a gesture feel alive instead of stiff, and it’s the first mark every figure artist makes.',
         how: 'Draw the longest continuous line from the head down the spine to the weight-bearing foot in one stroke. Push the curve a little further than you think you see — a gesture exaggerates the rhythm.' },
@@ -2269,6 +2471,8 @@ window.ATELIER_REFS = [{"id": "ws-lines-1", "title": "Straight lines — set 1",
         if (m.iou != null && m.iou < 0.75) return coach.PRINCIPLES.apex;
       } else if (exKey === 'gesture') {
         if (m.iou != null && m.iou < 0.8) return coach.PRINCIPLES.loa;
+      } else if (exKey === 'shade') {
+        if (m.iou != null && m.iou < 0.8) return coach.PRINCIPLES.terminator;
       } else {   // polygon / envelope
         if (m.aspectErrPct != null && Math.abs(m.aspectErrPct) >= 8) return coach.PRINCIPLES.proportion;
         if (m.iou != null && m.iou < 0.75) return coach.PRINCIPLES.envelope;
@@ -2292,20 +2496,27 @@ window.ATELIER_REFS = [{"id": "ws-lines-1", "title": "Straight lines — set 1",
    ========================================================================== */
 (function (A) {
   'use strict';
-  const LADDER = ['line', 'angles', 'curve', 'polygon', 'envelope'];   // classical order incl. curves
+  // The scored-drill ladder is DERIVED from the curriculum (call-time), so a
+  // newly added scored drill can never be silently left out of mastery points,
+  // weakest-drill targeting or spaced review again (it happened twice: curve,
+  // then gesture).
+  const LADDER = () => A.curr.EXERCISES.filter((e) => e.scored).map((e) => e.key);
 
   // ---- mastery & rank (driven by skill levels + passed plates, never volume) ----
   function masteryPoints() {
     let p = 0;
-    LADDER.forEach((k) => { p += A.curr.level(k); });
+    LADDER().forEach((k) => { p += A.curr.level(k); });
     const pl = A.store.get('percLevel', { angle: 1, prop: 1 });
-    p += (pl.angle || 1) + (pl.prop || 1);
+    ['angle', 'prop', 'curve', 'value'].forEach((k) => { p += (pl[k] || 1); });
     p += platesPassed();   // application layer counts too (max +4)
-    return p;              // floor 7 (all level 1), ceiling 65
+    return p;              // floor 11 (all level 1), ceiling ~99
   }
+  // Thresholds sit against the point FLOOR (every track starts at level 1:
+  // 7 drills + 4 perception kinds = 11 points) and the ~99 ceiling. Master ≈
+  // every track around level 5-6 — the same standard as before the curriculum grew.
   const RANKS = [
-    { name: 'Novice', at: 0 }, { name: 'Apprentice', at: 10 },
-    { name: 'Journeyman', at: 16 }, { name: 'Draughtsman', at: 24 }, { name: 'Master', at: 34 }
+    { name: 'Novice', at: 0 }, { name: 'Apprentice', at: 15 },
+    { name: 'Journeyman', at: 27 }, { name: 'Draughtsman', at: 40 }, { name: 'Master', at: 56 }
   ];
   function rank() {
     const p = masteryPoints(); let cur = RANKS[0], next = null;
@@ -2321,8 +2532,8 @@ window.ATELIER_REFS = [{"id": "ws-lines-1", "title": "Straight lines — set 1",
   // badged, and the one "come back" badge rewards recovery, not guilt.
   const mean = (xs) => xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : 0;
   const lvl = (k) => A.curr.level(k);
-  const allLv = (n) => LADDER.every((k) => lvl(k) >= n);
-  const anyLv = (n) => LADDER.some((k) => lvl(k) >= n);
+  const allLv = (n) => LADDER().every((k) => lvl(k) >= n);
+  const anyLv = (n) => LADDER().some((k) => lvl(k) >= n);
   const percLv = () => A.store.get('percLevel', { angle: 1, prop: 1 });
   // Monday-aligned week index of a 'YYYY-MM-DD' key (alignment consistency is
   // what matters, not calendar correctness)
@@ -2349,9 +2560,9 @@ window.ATELIER_REFS = [{"id": "ws-lines-1", "title": "Straight lines — set 1",
     // mastery
     { id: 'first90', icon: '◆', name: 'First 90', desc: 'Score 90+ on any drill', test: (c) => c.attempts.some((a) => a.scored && a.score >= 90) },
     { id: 'anyLv5', icon: '◈', name: 'Journeyman’s mark', desc: 'Reach level 5 in any drill', test: () => anyLv(5) },
-    { id: 'allLv5', icon: '⬗', name: 'Solid foundations', desc: 'All five drills at level 5+', test: () => allLv(5) },
+    { id: 'allLv5', icon: '⬗', name: 'Solid foundations', desc: 'Every drill at level 5+', test: () => allLv(5) },
     { id: 'anyLv9', icon: '❖', name: 'Master’s mark', desc: 'Reach level 9 in any drill', test: () => anyLv(9) },
-    { id: 'allLv9', icon: '✥', name: 'The full ladder', desc: 'All five drills at level 9', test: () => allLv(9) },
+    { id: 'allLv9', icon: '✥', name: 'The full ladder', desc: 'Every drill at level 9', test: () => allLv(9) },
     { id: 'sharpEye1', icon: '◉', name: 'Sharp eye', desc: 'Both perception drills at level 4+', test: () => { const p = percLv(); return (p.angle || 1) >= 4 && (p.prop || 1) >= 4; } },
     { id: 'sharpEye2', icon: '◎', name: 'Surgeon’s eye', desc: 'Both perception drills at level 8', test: () => { const p = percLv(); return (p.angle || 1) >= 8 && (p.prop || 1) >= 8; } },
     { id: 'quick', icon: '⚡', name: 'Quick study', desc: 'Score 85+ on a line with a ≤2s glance', test: (c) => c.attempts.some((a) => a.type === 'line' && a.score >= 85 && a.studySec <= 2) },
@@ -2371,7 +2582,7 @@ window.ATELIER_REFS = [{"id": "ws-lines-1", "title": "Straight lines — set 1",
     { id: 'prop', icon: '▱', name: 'True proportion', desc: 'Proportion bias under 3% over 20 shapes', test: (c) => { const f = c.attempts.filter((a) => (a.type === 'polygon' || a.type === 'envelope') && a.metrics && a.metrics.aspectErrPct != null).slice(-20); return f.length >= 20 && Math.abs(mean(f.map((a) => a.metrics.aspectErrPct))) < 3; } },
     { id: 'honestHand', icon: '✋', name: 'Honest hand', desc: '50 first-look figures at level 6+ with zero glances', test: (c) => c.attempts.filter((a) => a.scored && !a.recall && a.level >= 6 && !a.glances).length >= 50 },
     // the honorary terminal — depth, not points
-    { id: 'masterAtelier', icon: '♛', name: 'Master of the Atelier', desc: 'All drills level 7+, the plate course passed, and a 30-day streak', test: (c) => LADDER.every((k) => lvl(k) >= 7) && platesPassed() >= 4 && c.bestStreak >= 30 }
+    { id: 'masterAtelier', icon: '♛', name: 'Master of the Atelier', desc: 'All drills level 7+, the plate course passed, and a 30-day streak', test: (c) => LADDER().every((k) => lvl(k) >= 7) && platesPassed() >= 4 && c.bestStreak >= 30 }
   ];
 
   // returns {now:[newly earned defs], earned:{id:ts}, all:ACH}
@@ -2420,7 +2631,7 @@ window.ATELIER_REFS = [{"id": "ws-lines-1", "title": "Straight lines — set 1",
   function weakestDrill(attempts, minN) {
     minN = minN || 3;
     let worst = null, worstMean = Infinity;
-    for (const k of LADDER) {
+    for (const k of LADDER()) {
       const xs = (attempts || []).filter((a) => a.type === k && a.scored && !a.repeat && !a.recall)
                                  .slice(-5).map((a) => a.score);
       if (xs.length < minN) continue;
@@ -2438,16 +2649,17 @@ window.ATELIER_REFS = [{"id": "ws-lines-1", "title": "Straight lines — set 1",
      DESCRIBES the day (any qualifying practice ticks a segment) rather than
      prescribing it — autonomy-supportive, per OPTIMAL theory. Completing the
      plan (not raw minutes) is what feeds the streak in 'plan' goal mode.     */
-  const PERC_TYPES = ['perc-angle', 'perc-prop'];
+  // all perception-drill attempt types (adjustment + forced-choice) count as warm-up
+  const PERC_TYPES = ['perc-angle', 'perc-prop', 'perc-curve', 'perc-value', 'afc-angle', 'afc-length'];
   function planPick(attempts) {
     const today = todayStr();
     const stored = A.store.get('planPick', null);
     if (stored && stored.day === today && A.curr.def(stored.exKey)) return stored.exKey;
     // priority: due for spaced review > weakest > ladder walk
-    const due = A.curr.dueDrills(today).filter((d) => LADDER.indexOf(d.key) >= 0);
+    const due = A.curr.dueDrills(today).filter((d) => LADDER().indexOf(d.key) >= 0);
     let pick = due.length ? due[0].key : null;
     if (!pick) { const w = weakestDrill(attempts); pick = w && w.exKey; }
-    if (!pick) pick = LADDER.find((k) => A.curr.level(k) < 3) || LADDER[0];
+    if (!pick) pick = LADDER().find((k) => A.curr.level(k) < 3) || LADDER()[0];
     A.store.set('planPick', { day: today, exKey: pick });
     return pick;
   }
@@ -2515,7 +2727,7 @@ window.ATELIER_REFS = [{"id": "ws-lines-1", "title": "Straight lines — set 1",
   function recommend(attempts) {
     const now = Date.now();
     const today = todayStr();
-    const percTs = (attempts || []).filter((a) => a.type === 'perc-angle' || a.type === 'perc-prop').map((a) => a.ts);
+    const percTs = (attempts || []).filter((a) => PERC_TYPES.indexOf(a.type) >= 0).map((a) => a.ts);
     const lastPerc = percTs.length ? Math.max.apply(null, percTs) : 0;
     if (!(lastPerc && now - lastPerc < WARM_MS)) {
       return { step: 'warmup', title: 'Warm up your eye', sub: 'a short perception warm-up (~8 rounds, no drawing) to prime accurate seeing' };
@@ -2528,7 +2740,7 @@ window.ATELIER_REFS = [{"id": "ws-lines-1", "title": "Straight lines — set 1",
     if (!doneRecallToday && oldScored.length) {
       return { step: 'recall', title: 'Retention check', sub: 'redraw a figure from a previous day — cold, from memory alone' };
     }
-    const order = LADDER;
+    const order = LADDER();
     const minLvl = Math.min.apply(null, order.map((k) => A.curr.level(k)));
     if (minLvl < GRAD) {                                  // Foundations: walk the ladder
       const pick = order.find((k) => A.curr.level(k) < GRAD) || order[0];
@@ -2536,7 +2748,7 @@ window.ATELIER_REFS = [{"id": "ws-lines-1", "title": "Straight lines — set 1",
     }
     // Spaced review: serve the most-overdue drill before anything new — skills
     // decay on their own schedule, and distributed retrieval is what holds them.
-    const due = A.curr.dueDrills(today).filter((d) => LADDER.indexOf(d.key) >= 0);
+    const due = A.curr.dueDrills(today).filter((d) => LADDER().indexOf(d.key) >= 0);
     if (due.length) {
       const pick = due[0].key;
       const late = -due[0].due;
@@ -2679,8 +2891,12 @@ window.ATELIER_REFS = [{"id": "ws-lines-1", "title": "Straight lines — set 1",
     // retrieval is the desirable difficulty.
     this.enforced = this.def.scored && this.level >= 4;
     this.selfPaced = !this.enforced;
-    this.studyCap = this.def.scored ? A.curr.studySeconds(this.exKey)
-                                    : (this.ref && this.ref.studySec) || this.def.study();
+    // pace preference: 'relaxed' stretches the suggested study/draw times by 50%
+    // for learners who find the adaptive defaults rushed — the science stays the
+    // same (glances still shrink with level), just on a gentler clock
+    const pace = A.store.get('pace', 'standard') === 'relaxed' ? 1.5 : 1;
+    this.studyCap = Math.round((this.def.scored ? A.curr.studySeconds(this.exKey)
+                                    : (this.ref && this.ref.studySec) || this.def.study()) * pace);
     this.studySec = this.studyCap;
     this.studyRemaining = this.studyCap;
     this.studyElapsed = 0;
@@ -2760,7 +2976,8 @@ window.ATELIER_REFS = [{"id": "ws-lines-1", "title": "Straight lines — set 1",
     this.stage = 0;
     // recall budget: soft target for committing the marks before the memory trace
     // fades (scored drills only — reference copies are deliberately unhurried)
-    this.drawBudget = this.def.scored ? (this.def.draw || null) : null;
+    const dpace = A.store.get('pace', 'standard') === 'relaxed' ? 1.5 : 1;
+    this.drawBudget = this.def.scored ? (this.def.draw ? Math.round(this.def.draw * dpace) : null) : null;
     this.drawElapsed = 0;
     this.drawStart = performance.now();
     this._startDrawTimer();
@@ -2812,7 +3029,7 @@ window.ATELIER_REFS = [{"id": "ws-lines-1", "title": "Straight lines — set 1",
 
   Drill.prototype.canEvaluate = function () {
     if (this.surface.isEmpty()) return false;
-    if (this.exKey === 'line' || this.exKey === 'curve' || this.exKey === 'gesture') return this.surface.totalPoints() >= 2;
+    if (this.exKey === 'line' || this.exKey === 'curve' || this.exKey === 'gesture' || this.exKey === 'shade') return this.surface.totalPoints() >= 2;
     if (this.exKey === 'polygon' || this.exKey === 'envelope') return this.surface.totalPoints() >= 3;
     return true;
   };
@@ -2846,6 +3063,11 @@ window.ATELIER_REFS = [{"id": "ws-lines-1", "title": "Straight lines — set 1",
         r = A.geom.scoreCurve(this.target.polyline, this.surface.pointsDesign());
       } else if (this.exKey === 'gesture') {
         r = A.geom.scoreCurve(this.target.loa, this.surface.pointsDesign());
+      } else if (this.exKey === 'shade') {
+        // POSITION matters: the shadow line must sit in the right place ON the
+        // form, so no endpoint alignment; deviation scaled by the form's radius
+        const f = this.target.form;
+        r = A.geom.scoreCurveFixed(this.target.polyline, this.surface.pointsDesign(), Math.max(f.rx, f.ry) * 2);
       } else {
         // score from ALL strokes combined (a shape drawn in several strokes is fine)
         r = A.geom.scoreShape(this.target.polygon, this.surface.pointsDesign());
@@ -3060,11 +3282,15 @@ window.ATELIER_REFS = [{"id": "ws-lines-1", "title": "Straight lines — set 1",
   }
   // study glance shrinks with level; stimuli get less "easy" (oblique angles, non-half ratios)
   function studyFor(kind, lvl) {
-    return kind === 'angle' ? Math.max(1.2, +(4.5 - (lvl - 1) * 0.4).toFixed(1))
-                            : Math.max(1.5, +(5 - (lvl - 1) * 0.4).toFixed(1));
+    if (kind === 'angle') return Math.max(1.2, +(4.5 - (lvl - 1) * 0.4).toFixed(1));
+    if (kind === 'curve') return Math.max(1.5, +(5 - (lvl - 1) * 0.4).toFixed(1));
+    if (kind === 'value') return Math.max(1.2, +(3.5 - (lvl - 1) * 0.3).toFixed(1));
+    return Math.max(1.5, +(5 - (lvl - 1) * 0.4).toFixed(1));
   }
   function pickAngle(lvl) { let a; do { a = Math.round(rnd(8, 172)); } while (lvl >= 4 && [0, 45, 90, 135, 180].some((c) => Math.abs(a - c) < 8)); return a; }
   function pickRatio(lvl) { let r; do { r = +rnd(0.25, 0.95).toFixed(3); } while (lvl >= 4 && Math.abs(r - 0.5) < 0.08); return r; }
+  function pickBow(lvl) { let b; do { b = +rnd(0.08, 0.45).toFixed(3); } while (lvl >= 4 && Math.abs(b - 0.25) < 0.03); return b; }
+  function pickValue(lvl) { return Math.round(lvl >= 4 ? rnd(25, 75) : rnd(15, 85)); }   // mid-greys are the hard ones
 
   let el, instr, timerEl, countEl, stim, ctrl, st = {};
   let ringEl, ringFill, ringLabel;
@@ -3122,6 +3348,22 @@ window.ATELIER_REFS = [{"id": "ws-lines-1", "title": "Straight lines — set 1",
     if (!opts.hideRight) s += `<rect x="${rightX}" y="${floor - rH}" width="${w}" height="${rH}" fill="${opts.rightColor || 'var(--accent)'}"/>`;
     return s;
   }
+  // curve with a given bow (sagitta as a fraction of the chord) — quadratic bezier
+  function curveSVG(bow, color, w, ang) {
+    const cx = 140, cy = 100, L = 170, a = (ang || 0) * Math.PI / 180;
+    const dx = Math.cos(a) * L / 2, dy = Math.sin(a) * L / 2;
+    const x1 = cx - dx, y1 = cy - dy, x2 = cx + dx, y2 = cy + dy;
+    const nx = -Math.sin(a), ny = Math.cos(a);
+    const off = 2 * bow * L * 0.5;                    // bezier sagitta = off/2 → bow·L/2
+    const mx = cx + nx * off, my = cy + ny * off;
+    return `<path d="M${x1},${y1} Q${mx},${my} ${x2},${y2}" fill="none" stroke="${color}" stroke-width="${w || 4}" stroke-linecap="round"/>`;
+  }
+  // grey patch on a mid-grey surround (controls simultaneous contrast)
+  function valueSVG(v) {
+    const g = Math.round(255 * v / 100);
+    return `<circle cx="140" cy="100" r="72" fill="rgb(148,144,136)"/>
+      <rect x="105" y="65" width="70" height="70" rx="8" fill="rgb(${g},${g},${g})"/>`;
+  }
   function svgBox(inner) { return `<svg viewBox="0 0 280 200" style="width:min(360px,82vw);height:auto;background:#fff;border:1px solid var(--line);border-radius:12px">${inner}</svg>`; }
 
   // --- flow ---------------------------------------------------------------
@@ -3136,9 +3378,12 @@ window.ATELIER_REFS = [{"id": "ws-lines-1", "title": "Straight lines — set 1",
     st.studySec = studyFor(kind, lvl);
     st.remaining = st.studySec;
     if (kind === 'angle') { st.truth = pickAngle(lvl); stim.innerHTML = svgBox(angleSVG(st.truth, 'var(--ink)')); }
+    else if (kind === 'curve') { st.truth = pickBow(lvl); st.ang = lvl >= 5 ? Math.round(rnd(-35, 35)) : 0; stim.innerHTML = svgBox(curveSVG(st.truth, 'var(--ink)', 4, st.ang)); }
+    else if (kind === 'value') { st.truth = pickValue(lvl); stim.innerHTML = svgBox(valueSVG(st.truth)); }
     else { st.truth = pickRatio(lvl); stim.innerHTML = svgBox(barsSVG(st.truth)); }
     ctrl.innerHTML = '';
-    instr.textContent = (kind === 'angle' ? 'Memorise the angle.' : 'Memorise the proportion (right vs left).') + '  ·  Lv ' + lvl;
+    const CUES = { angle: 'Memorise the angle.', curve: 'Memorise how much the curve bows.', value: 'Memorise the grey — how light or dark.', prop: 'Memorise the proportion (right vs left).' };
+    instr.textContent = (CUES[kind] || CUES.prop) + '  ·  Lv ' + lvl;
     timerEl.textContent = Math.ceil(st.remaining) + 's';
     setRing(1, false, 'memorise');
     clearInterval(st.timer);
@@ -3154,25 +3399,36 @@ window.ATELIER_REFS = [{"id": "ws-lines-1", "title": "Straight lines — set 1",
 
   function recall() {
     timerEl.textContent = ''; setRing(0, false, ''); st.t0 = performance.now();
-    instr.textContent = st.kind === 'angle' ? 'Set the line to the angle you saw.' : 'Set the right bar to match.';
+    const ASK = { angle: 'Set the line to the angle you saw.', curve: 'Set the bow to match.', value: 'Set the grey to match.', prop: 'Set the right bar to match.' };
+    instr.textContent = ASK[st.kind] || ASK.prop;
     // randomised start anchor: a fixed start (90° / 60%) lets the eye learn
     // "distance from the anchor" instead of the quantity itself, and method-of-
     // adjustment answers drift toward the anchor. Start somewhere new each time
     // (kept a margin away from the truth so there's always a real adjustment).
+    const slider = (min, max, val) => `<div class="opacityctl"><input type="range" id="p-range" min="${min}" max="${max}" value="${val}"></div>
+        <button class="btn block" id="p-submit" style="margin-top:12px">Reveal ›</button>`;
     if (st.kind === 'angle') {
       do { st.guess = Math.round(rnd(5, 174)); } while (Math.abs(st.guess - st.truth) < 20);
       stim.innerHTML = svgBox(angleSVG(st.guess, 'var(--accent)'));
-      ctrl.innerHTML = `<div class="opacityctl"><input type="range" id="p-range" min="0" max="179" value="${st.guess}"></div>
-        <button class="btn block" id="p-submit" style="margin-top:12px">Reveal ›</button>`;
+      ctrl.innerHTML = slider(0, 179, st.guess);
+    } else if (st.kind === 'curve') {
+      do { st.guess = Math.round(rnd(5, 50)) / 100; } while (Math.abs(st.guess - st.truth) < 0.1);
+      stim.innerHTML = svgBox(curveSVG(st.guess, 'var(--accent)', 4, st.ang));
+      ctrl.innerHTML = slider(5, 50, Math.round(st.guess * 100));
+    } else if (st.kind === 'value') {
+      do { st.guess = Math.round(rnd(5, 95)); } while (Math.abs(st.guess - st.truth) < 18);
+      stim.innerHTML = svgBox(valueSVG(st.guess));
+      ctrl.innerHTML = slider(0, 100, st.guess);
     } else {
       do { st.guess = Math.round(rnd(15, 105)) / 100; } while (Math.abs(st.guess - st.truth) < 0.12);
       stim.innerHTML = svgBox(barsSVG(st.guess));
-      ctrl.innerHTML = `<div class="opacityctl"><input type="range" id="p-range" min="10" max="110" value="${Math.round(st.guess * 100)}"></div>
-        <button class="btn block" id="p-submit" style="margin-top:12px">Reveal ›</button>`;
+      ctrl.innerHTML = slider(10, 110, Math.round(st.guess * 100));
     }
     const range = el.querySelector('#p-range');
     range.oninput = () => {
       if (st.kind === 'angle') { st.guess = +range.value; stim.innerHTML = svgBox(angleSVG(st.guess, 'var(--accent)')); }
+      else if (st.kind === 'curve') { st.guess = +range.value / 100; stim.innerHTML = svgBox(curveSVG(st.guess, 'var(--accent)', 4, st.ang)); }
+      else if (st.kind === 'value') { st.guess = +range.value; stim.innerHTML = svgBox(valueSVG(st.guess)); }
       else { st.guess = +range.value / 100; stim.innerHTML = svgBox(barsSVG(st.guess)); }
     };
     el.querySelector('#p-submit').onclick = reveal;
@@ -3191,6 +3447,23 @@ window.ATELIER_REFS = [{"id": "ws-lines-1", "title": "Straight lines — set 1",
       metrics = { angleErrDeg: +se.toFixed(1) };
       label = `You: ${st.guess}° · actual: ${st.truth}° · off ${Math.round(err)}°`;
       stim.innerHTML = svgBox(angleSVG(st.truth, 'var(--ink)', 4) + angleSVG(st.guess, 'var(--accent)', 2));
+    } else if (st.kind === 'curve') {
+      const err = Math.abs(st.guess - st.truth);
+      score = Math.max(0, Math.round(100 - err * 300));
+      metrics = { bowErr: +((st.guess - st.truth)).toFixed(3) };
+      label = `You: ${Math.round(st.guess * 100)} · actual: ${Math.round(st.truth * 100)} (bow) · off ${Math.round(err * 100)}`;
+      stim.innerHTML = svgBox(curveSVG(st.truth, 'var(--ink)', 4, st.ang) + curveSVG(st.guess, 'var(--accent)', 2, st.ang));
+    } else if (st.kind === 'value') {
+      const err = Math.abs(st.guess - st.truth);
+      score = Math.max(0, Math.round(100 - err * 2.5));
+      metrics = { valueErr: +(st.guess - st.truth).toFixed(1) };
+      label = `You: ${st.guess} · actual: ${st.truth} (0 dark – 100 light) · off ${Math.round(err)}`;
+      const g1 = Math.round(255 * st.truth / 100), g2 = Math.round(255 * st.guess / 100);
+      stim.innerHTML = svgBox(`<circle cx="140" cy="100" r="72" fill="rgb(148,144,136)"/>
+        <rect x="70" y="65" width="66" height="70" rx="8" fill="rgb(${g1},${g1},${g1})"/>
+        <rect x="144" y="65" width="66" height="70" rx="8" fill="rgb(${g2},${g2},${g2})"/>
+        <text x="103" y="152" text-anchor="middle" font-size="11" fill="#333">actual</text>
+        <text x="177" y="152" text-anchor="middle" font-size="11" fill="#333">you</text>`);
     } else {
       const err = Math.abs(st.guess - st.truth) / st.truth * 100;
       score = Math.max(0, Math.round(100 - err));
@@ -3200,7 +3473,7 @@ window.ATELIER_REFS = [{"id": "ws-lines-1", "title": "Straight lines — set 1",
     }
     instr.textContent = 'Compare.';
     A.store.addAttempt({
-      ts: Date.now(), day: dayKey(), type: st.kind === 'angle' ? 'perc-angle' : 'perc-prop',
+      ts: Date.now(), day: dayKey(), type: 'perc-' + st.kind,
       scored: true, level: st.level, studySec: st.studySec, drawSec: +think.toFixed(1),
       score, selfRated: false, selfEstimate: null, estErr: null, metrics,
       target: st.kind === 'angle' ? { kind: 'line', lines: [[[0.2, 0.5], [0.8, 0.5]]] } : null,
@@ -3240,7 +3513,117 @@ window.ATELIER_REFS = [{"id": "ws-lines-1", "title": "Straight lines — set 1",
     }
   }
 
-  A.Perceive = { start };
+  /* ---- 2AFC: forced-choice discrimination with an adaptive staircase -------
+     The fastest-proven format for sharpening discrimination: two stimuli, pick
+     which is more (steeper / longer), immediate right-wrong feedback, and a
+     2-down-1-up staircase that homes in on your just-noticeable difference.
+     Ends after 16 taps; the threshold (mean of the last reversals) is the
+     score that should shrink over weeks.                                     */
+  const AFC = {
+    angle:  { start: 14, min: 1,  max: 30, unit: '°',  ask: 'Which line is steeper?' },
+    length: { start: 18, min: 2,  max: 40, unit: '%',  ask: 'Which line is longer?' }
+  };
+  // pure staircase step (exported for tests): 2 consecutive correct → harder
+  // (smaller diff); any miss → easier. Reversals mark the oscillation points.
+  function stairStep(s, correct) {
+    const out = { diff: s.diff, streak: s.streak, dir: null, reversal: false };
+    if (correct) {
+      out.streak = s.streak + 1;
+      if (out.streak >= 2) { out.diff = s.diff * 0.72; out.streak = 0; out.dir = 'down'; }
+    } else {
+      out.diff = s.diff * 1.45; out.streak = 0; out.dir = 'up';
+    }
+    if (out.dir && s.lastDir && out.dir !== s.lastDir) out.reversal = true;
+    out.lastDir = out.dir || s.lastDir;
+    return out;
+  }
+
+  const AFC_TAPS = 16;
+  function startAFC(kind) {
+    build(); el.classList.add('on');
+    const cfg = AFC[kind] || AFC.angle;
+    st = { afc: kind, cfg, diff: cfg.start, streak: 0, lastDir: null,
+           reversals: [], taps: 0, hits: 0, t0: performance.now(), timer: null };
+    setRing(0, false, 'discriminate');
+    afcRound();
+  }
+  function afcRound() {
+    const cfg = st.cfg;
+    st.diff = Math.max(cfg.min, Math.min(cfg.max, st.diff));
+    timerEl.textContent = (st.taps + 1) + '/' + AFC_TAPS;
+    instr.textContent = cfg.ask + '  ·  Δ ' + st.diff.toFixed(1) + cfg.unit;
+    st.moreIsLeft = Math.random() < 0.5;
+    let leftSVG, rightSVG;
+    if (st.afc === 'angle') {
+      const base = rnd(15, 55);
+      const hi = base + st.diff;                              // steeper = closer to vertical
+      const lo = base;
+      const draw = (deg) => `<line x1="60" y1="170" x2="${60 + Math.cos(deg * Math.PI / 180) * 130}" y2="${170 - Math.sin(deg * Math.PI / 180) * 130}" stroke="var(--ink)" stroke-width="4" stroke-linecap="round"/>`;
+      leftSVG = draw(st.moreIsLeft ? hi : lo); rightSVG = draw(st.moreIsLeft ? lo : hi);
+    } else {
+      const base = rnd(90, 130);
+      const hi = base * (1 + st.diff / 100), lo = base;
+      const draw = (len) => { const x = rnd(20, 250 - len); const y = rnd(80, 120);
+        return `<line x1="${x}" y1="${y}" x2="${x + len}" y2="${y}" stroke="var(--ink)" stroke-width="5" stroke-linecap="round"/>`; };
+      leftSVG = draw(st.moreIsLeft ? hi : lo); rightSVG = draw(st.moreIsLeft ? lo : hi);
+    }
+    stim.innerHTML = `<div style="display:flex;gap:10px;justify-content:center">
+      <div style="flex:1;max-width:200px">${svgBox(leftSVG)}</div>
+      <div style="flex:1;max-width:200px">${svgBox(rightSVG)}</div></div>`;
+    ctrl.innerHTML = `<div class="row" style="margin-top:10px">
+      <button class="btn block" id="afc-l">Left</button>
+      <button class="btn block" id="afc-r">Right</button></div>
+      <div class="tiny muted" style="text-align:center;margin-top:8px">Immediate feedback — trust the first impression.</div>`;
+    el.querySelector('#afc-l').onclick = () => afcAnswer(true);
+    el.querySelector('#afc-r').onclick = () => afcAnswer(false);
+  }
+  function afcAnswer(saidLeft) {
+    const correct = saidLeft === st.moreIsLeft;
+    st.taps++; if (correct) st.hits++;
+    const stepped = stairStep(st, correct);
+    if (stepped.reversal) st.reversals.push(st.diff);
+    st.diff = stepped.diff; st.streak = stepped.streak; st.lastDir = stepped.lastDir;
+    setRing(st.taps / AFC_TAPS, false, 'discriminate');
+    instr.textContent = correct ? '✓ Correct' : '✗ Not this time';
+    if (st.taps >= AFC_TAPS) { setTimeout(afcEnd, 420); }
+    else setTimeout(afcRound, 420);
+  }
+  function afcEnd() {
+    const cfg = st.cfg;
+    const revs = st.reversals.slice(-4);
+    const threshold = +(revs.length >= 2 ? revs.reduce((a, b) => a + b, 0) / revs.length : st.diff).toFixed(1);
+    const elapsed = (performance.now() - st.t0) / 1000;
+    const type = 'afc-' + st.afc;
+    const score = Math.max(0, Math.min(100, Math.round(100 - threshold * (st.afc === 'angle' ? 6 : 4))));
+    A.store.addAttempt({
+      ts: Date.now(), day: dayKey(), type, scored: true, level: 1,
+      studySec: 0, drawSec: +elapsed.toFixed(1), score,
+      selfRated: false, selfEstimate: null, estErr: null,
+      metrics: { threshold, taps: st.taps, hits: st.hits },
+      target: null, strokes: [], refId: null, refTitle: null
+    });
+    A.habit.touch(elapsed);
+    const bests = A.store.get('afcBest', {});
+    const isBest = bests[st.afc] == null || threshold < bests[st.afc];
+    if (isBest) { bests[st.afc] = threshold; A.store.set('afcBest', bests); }
+    if (A.ui && A.ui.invalidate) A.ui.invalidate();
+    timerEl.textContent = ''; setRing(0, false, '');
+    instr.textContent = 'Discrimination threshold.';
+    stim.innerHTML = '';
+    ctrl.innerHTML = `<div class="card" style="width:100%;text-align:center">
+      <div class="scorebadge ${score >= 85 ? 's-good' : score >= 65 ? 's-mid' : 's-low'}">${threshold}${cfg.unit}</div>
+      <div class="muted small">smallest difference your eye caught (${st.hits}/${st.taps} correct)</div>
+      ${isBest ? '<div class="insight" style="margin-top:8px">★ Your finest threshold yet — the eye is sharpening.</div>'
+               : `<div class="tiny muted" style="margin-top:8px">Best so far: ${bests[st.afc]}${cfg.unit}. Lower is finer.</div>`}
+      <div class="row" style="margin-top:10px">
+        <button class="btn ghost block" id="p-again">Again</button>
+        <button class="btn block" id="p-done">Done</button></div></div>`;
+    el.querySelector('#p-again').onclick = () => startAFC(st.afc);
+    el.querySelector('#p-done').onclick = close;
+  }
+
+  A.Perceive = { start, startAFC, stairStep,
+                 kinds: ['angle', 'prop', 'curve', 'value'], afcKinds: ['angle', 'length'] };
 })(window.A = window.A || {});
 
 
@@ -3521,6 +3904,7 @@ window.ATELIER_REFS = [{"id": "ws-lines-1", "title": "Straight lines — set 1",
     const t = att.target; if (!t) return { lines: [], polys: [], curves: [] };
     if (t.kind === 'line' || t.kind === 'angles') return { lines: t.lines, polys: [], curves: [] };
     if (t.kind === 'gesture' && t.loa) return { lines: [], polys: [], curves: [t.loa] };
+    if (t.kind === 'shade') return { lines: [], polys: t.contour ? [t.contour] : [], curves: [t.polyline] };
     if (t.polyline) return { lines: [], polys: [], curves: [t.polyline] };
     if (t.polygon) return { lines: [], polys: [t.polygon], curves: [] };
     return { lines: [], polys: [], curves: [] };
@@ -3860,13 +4244,16 @@ window.ATELIER_REFS = [{"id": "ws-lines-1", "title": "Straight lines — set 1",
   // erodes accuracy (deliberate practice); a warm-up is a brief ~5 min priming bout.
   // Distributed practice (several short sessions) beats one long massed sitting.
   const SESSIONS = { warmup: { n: 6, min: 5 }, mixed: { n: 12, min: 15 } };
-  const PERC_LABELS = { 'perc-angle': 'Perceive: Angle', 'perc-prop': 'Perceive: Proportion' };
+  const PERC_LABELS = { 'perc-angle': 'Perceive: Angle', 'perc-prop': 'Perceive: Proportion',
+    'perc-curve': 'Perceive: Curve', 'perc-value': 'Perceive: Value',
+    'afc-angle': 'Discriminate: Angle', 'afc-length': 'Discriminate: Length' };
   const exName = (type) => { const d = A.curr.def(type); return d ? d.name : (PERC_LABELS[type] || type); };
   const LOOKCUE = {
     line: 'its slant & length', angles: 'the angles between & the relative lengths',
     curve: 'its start, end & apex — the furthest point it bows out',
     polygon: 'each corner’s position & the proportions', envelope: 'the outer envelope, then where the contour turns sharply vs flows',
     gesture: 'the line of action — the single sweep from head to foot',
+    shade: 'where the light turns to shadow — the terminator\u2019s path across the form',
     contour: 'the path of the edge', negative: 'the empty shapes between the forms',
     bargue: 'the big straight block-in', value: 'where light turns to dark',
     master: 'the largest shapes & their placement'
@@ -3961,13 +4348,19 @@ window.ATELIER_REFS = [{"id": "ws-lines-1", "title": "Straight lines — set 1",
     else if (step === 'resume') resumeSession();
     else if (step === 'mixed') { const sv = savedSession(); if (sv && sv.kind === 'mixed') resumeSession(); else startSession('mixed'); }
   }
-  // alternate the warm-up between angle and proportion (the app teaches doing
-  // both); prefer whichever perception skill is at the lower level
+  // rotate the warm-up across all judgement kinds, always preferring the one
+  // at the lowest level (the weakest perceptual skill gets the reps)
   function startWarmup() {
-    const pl = A.store.get('percLevel', { angle: 1, prop: 1 });
-    if ((pl.angle || 1) !== (pl.prop || 1)) { A.Perceive.start((pl.angle || 1) <= (pl.prop || 1) ? 'angle' : 'prop'); return; }
-    const last = A.store.get('lastWarmKind', 'prop');
-    const kind = last === 'angle' ? 'prop' : 'angle';
+    const kinds = A.Perceive.kinds;
+    const pl = A.store.get('percLevel', {});
+    const minLv = Math.min.apply(null, kinds.map((k) => pl[k] || 1));
+    const lowest = kinds.filter((k) => (pl[k] || 1) === minLv);
+    let kind;
+    if (lowest.length === 1) kind = lowest[0];
+    else {
+      const last = A.store.get('lastWarmKind', '');
+      kind = lowest[(lowest.indexOf(last) + 1) % lowest.length];   // round-robin the ties
+    }
     A.store.set('lastWarmKind', kind);
     A.Perceive.start(kind);
   }
@@ -4214,15 +4607,26 @@ window.ATELIER_REFS = [{"id": "ws-lines-1", "title": "Straight lines — set 1",
         <button class="btn ghost" data-session="warmup">${lbl('warmup', `Quick session · ${SESSIONS.warmup.n} · ~${SESSIONS.warmup.min} min`)}</button></div>
       <div class="tiny muted" style="margin-top:8px">Mixed = a full workout · Quick = a short version when time’s tight.</div></div>
       <div class="card"><h2>Perception warm-up <span class="tag self">2–3 min</span></h2>
-      <p class="small muted" style="margin:4px 0 10px"><b>When:</b> at the <b>start of every session</b> (and again if you come back hours later). No drawing — you just judge angles and proportions to prime your eye, because misperceiving the subject (not the hand) is the main cause of inaccurate drawing. Do <b>Judge angle</b> before Lines &amp; Angles, <b>Judge proportion</b> before Polygons &amp; Envelopes. Both level up on their own.</p>
-      <div class="row wrap"><button class="btn soft" data-perc="angle">Judge angle · Lv ${A.store.get('percLevel', { angle: 1 }).angle || 1}</button>
-        <button class="btn soft" data-perc="prop">Judge proportion · Lv ${A.store.get('percLevel', { prop: 1 }).prop || 1}</button></div></div>`;
+      <p class="small muted" style="margin:4px 0 10px"><b>When:</b> at the <b>start of every session</b> (and again if you come back hours later). No drawing — you just judge to prime your eye, because misperceiving the subject (not the hand) is the main cause of inaccurate drawing. Each judgement levels up on its own.</p>
+      <div class="row wrap">${['angle', 'prop', 'curve', 'value'].map((k) => {
+        const pl = A.store.get('percLevel', {});
+        const names = { angle: 'Judge angle', prop: 'Judge proportion', curve: 'Judge curve', value: 'Judge value' };
+        return `<button class="btn soft" data-perc="${k}">${names[k]} · Lv ${pl[k] || 1}</button>`;
+      }).join('')}</div>
+      <p class="small muted" style="margin:12px 0 8px"><b>Discriminate</b> — forced choice: which is steeper / longer? An adaptive staircase finds the smallest difference your eye can catch, then pushes it finer. Watch the threshold fall over weeks.</p>
+      <div class="row wrap">${['angle', 'length'].map((k) => {
+        const best = A.store.get('afcBest', {})[k];
+        const names = { angle: 'Which is steeper?', length: 'Which is longer?' };
+        const unit = k === 'angle' ? '°' : '%';
+        return `<button class="btn soft" data-afc="${k}">${names[k]}${best != null ? ` · best ${best}${unit}` : ''}</button>`;
+      }).join('')}</div></div>`;
     v.innerHTML = `${recLine(all)}<div class="banner">Not sure where to start? Use the <b>recommended</b> step above. Otherwise, pick any single drill or a guided session below.</div>${sessions}${groups}`;
     v.onclick = (e) => {
       const rc = e.target.closest('[data-rec]'); if (rc) { doRec(rc.dataset.rec, rc.dataset.recex); return; }
       const s = e.target.closest('[data-session]');
       if (s) { const sv2 = savedSession(); if (sv2 && sv2.kind === s.dataset.session) resumeSession(); else startSession(s.dataset.session); return; }
       const p = e.target.closest('[data-perc]'); if (p) { A.Perceive.start(p.dataset.perc); return; }
+      const f = e.target.closest('[data-afc]'); if (f) { A.Perceive.startAFC(f.dataset.afc); return; }
       const b = e.target.closest('[data-ex]'); if (b) startExercise(b.dataset.ex);
     };
   }
@@ -4299,11 +4703,16 @@ window.ATELIER_REFS = [{"id": "ws-lines-1", "title": "Straight lines — set 1",
       <button class="closeX" id="d-close" aria-label="Close drill">✕</button>
       <button class="closeX" id="d-help" style="right:58px;font-weight:600" aria-label="How this drill works">?</button>
       <canvas id="d-canvas"></canvas>
+      <button class="btn soft sm" id="d-zoomreset" style="display:none" aria-label="Reset zoom">⤢ 100%</button>
       <div id="d-result"></div>
       <div class="controls" id="d-controls"></div>
     </div>`);
     document.body.appendChild(d);
     surface = new A.Surface($('#d-canvas', d), { pencilOnly: A.store.get('pencilOnly', false), baseWidth: A.store.get('inkWidth', 3.2), smooth: A.store.get('smooth', 0.5) });
+    // pinch zoom (two fingers) — show a reset chip while zoomed in
+    const zr = $('#d-zoomreset', d);
+    surface.onViewChange = (z) => { zr.style.display = z > 1.02 ? 'block' : 'none'; };
+    zr.addEventListener('pointerup', (e) => { e.preventDefault(); surface.resetView(); });
     drill = new A.Drill(surface);
     drill.onState = updateDrill;
     drill.onTick = updateTimer;
@@ -4391,11 +4800,12 @@ window.ATELIER_REFS = [{"id": "ws-lines-1", "title": "Straight lines — set 1",
   }
   function startSession(kind) {
     const cfg = SESSIONS[kind] || SESSIONS.mixed;
-    // the full scored ladder — leaving one out (curve, historically) let the
-    // recommendation engine demand a drill sessions never actually served
+    // DERIVED from the curriculum so a new scored drill can never be left out
+    // of sessions again (it happened with curve, then gesture)
+    const allScored = A.curr.EXERCISES.filter((e) => e.scored).map((e) => e.key);
     const queue = kind === 'warmup'
-      ? shuffledQueue(['line', 'angles', 'curve', 'polygon'], cfg.n)
-      : shuffledQueue(['line', 'angles', 'curve', 'polygon', 'envelope', 'gesture'], cfg.n);
+      ? shuffledQueue(allScored.slice(0, 4), cfg.n)          // quick session: the foundations
+      : shuffledQueue(allScored, cfg.n);
     session = { kind, queue, completed: 0, results: [], day: A.habit.today() };
     // mixed sessions end on a FINISHER: the capstone drill one level up
     // (peak-end rule — the session's last memory is a real challenge). It never
@@ -4952,12 +5362,31 @@ window.ATELIER_REFS = [{"id": "ws-lines-1", "title": "Straight lines — set 1",
   /* ======================================================================
      STATS
      ====================================================================== */
+  let statsCat = 'all';
   async function renderStats(v) {
     const all = await attempts();
     if (!all.length) { v.innerHTML = `<div class="card"><h2>Statistics</h2><p class="muted small">No drills yet — practise a little and your accuracy trends, calibration bias and study-time curve will appear here.</p></div>`; return; }
     const sum = A.stats.summary(all);
-    const trend = A.stats.dailyTrend(all);
+    const trend = A.stats.dailyTrend(all, statsCat === 'all' ? null : statsCat);
+    const trendTypes = Array.from(new Set(all.filter((a) => a.scored && !PERC_LABELS[a.type]).map((a) => a.type)));
+    const trendChips = [`<button class="chip ${statsCat === 'all' ? 'active' : ''}" data-tcat="all">All</button>`]
+      .concat(trendTypes.map((t) => `<button class="chip ${statsCat === t ? 'active' : ''}" data-tcat="${t}">${esc(exName(t).split(' ')[0])}</button>`)).join('');
     const byType = Object.values(sum.byType).map((t) => ({ label: exName(t.type), value: t.mean, suffix: '' }));
+
+    // discrimination thresholds (2AFC): lower = a finer eye — plot so up = better
+    let afcCard = '';
+    const afcKinds = [['afc-angle', '°', 'angle'], ['afc-length', '%', 'length']];
+    const afcRows = afcKinds.map(([type, unit, label]) => {
+      const runs = all.filter((a) => a.type === type && a.metrics && a.metrics.threshold != null);
+      if (!runs.length) return '';
+      const byDay = {};
+      runs.forEach((a) => { (byDay[a.day] || (byDay[a.day] = [])).push(a.metrics.threshold); });
+      const t = Object.keys(byDay).sort().map((d) => ({ day: d, score: Math.max(0, Math.min(100, Math.round(100 - (byDay[d].reduce((x, y) => x + y, 0) / byDay[d].length) * (type === 'afc-angle' ? 6 : 4)))) }));
+      const best = A.store.get('afcBest', {})[label];
+      return `<div class="small muted" style="margin-top:6px">${esc(exName(type))} — best threshold <b>${best != null ? best + unit : '—'}</b> (lower = finer)</div>${A.charts.line(t)}`;
+    }).filter(Boolean).join('');
+    if (afcRows) afcCard = `<div class="card"><h2>Discrimination</h2>
+      <div class="small muted">the smallest difference your eye can catch — sharpening this is sharpening the eye itself</div>${afcRows}</div>`;
 
     // calibration insights for scored types that have data — each with a
     // "practice this" hand-off so Stats is a springboard, not a cul-de-sac
@@ -5028,7 +5457,9 @@ window.ATELIER_REFS = [{"id": "ws-lines-1", "title": "Straight lines — set 1",
           <div class="k"><div class="v">${sum.days}</div><div class="l">days active</div></div>
           <div class="k"><div class="v">🔥 ${A.habit.streak()}</div><div class="l">streak</div></div>
         </div></div>
-      <div class="card"><h2>Accuracy over time</h2><div class="small muted">daily mean across all drills</div>${A.charts.line(trend)}</div>
+      <div class="card"><h2>Accuracy over time</h2><div class="small muted">daily mean — tap a drill to isolate it</div>
+        <div class="chips" style="margin:8px 0 4px">${trendChips}</div>${A.charts.line(trend)}</div>
+      ${afcCard}
       ${progressCard}
       ${retCard}
       <div class="card"><h2>By exercise</h2>${A.charts.bars(byType)}</div>
@@ -5039,6 +5470,7 @@ window.ATELIER_REFS = [{"id": "ws-lines-1", "title": "Straight lines — set 1",
         <div class="small muted">each dot is one scored drill — does a longer glance actually help you?</div>
         ${A.charts.scatter(sva)}</div>`;
     v.onclick = (e) => {
+      const tc = e.target.closest('[data-tcat]'); if (tc) { statsCat = tc.dataset.tcat; renderStats(v); return; }
       const c = e.target.closest('[data-cmp]'); if (c) { showCompare(all, c.dataset.cmp); return; }
       const f = e.target.closest('[data-focus]'); if (f) { startExercise(f.dataset.focus); return; }
       const p = e.target.closest('[data-perc]'); if (p) A.Perceive.start(p.dataset.perc);
@@ -5081,18 +5513,33 @@ window.ATELIER_REFS = [{"id": "ws-lines-1", "title": "Straight lines — set 1",
   /* ======================================================================
      HISTORY
      ====================================================================== */
+  let histCat = 'all';
   async function renderHistory(v) {
     const all = (await attempts()).slice().sort((a, b) => b.ts - a.ts);
     if (!all.length) { v.innerHTML = `<div class="card"><h2>History</h2><p class="muted small">Your saved drills will appear here as a gallery you can replay.</p></div>`; return; }
-    const cells = all.slice(0, 200).map((a) => {
-      const dt = new Date(a.ts);
+    // filter chips: only the types that actually have attempts
+    const types = Array.from(new Set(all.map((a) => a.type))).filter((t) => !PERC_LABELS[t]);
+    const chips = [`<button class="chip ${histCat === 'all' ? 'active' : ''}" data-cat="all">All</button>`]
+      .concat(types.map((t) => `<button class="chip ${histCat === t ? 'active' : ''}" data-cat="${t}">${esc(exName(t).split(' ')[0])}</button>`)).join('');
+    const shown = histCat === 'all' ? all : all.filter((a) => a.type === histCat);
+    const cells = shown.slice(0, 200).map((a) => {
       return `<div class="cell" data-att="${a.id}">${A.history.thumbSVG(a, 130)}
         <div class="cap"><span>${esc(exName(a.type).split(' ')[0])}${a.recall ? ' ⟲' : ''}</span>
         <span class="sc ${scoreClass(a.score)}">${a.score}${a.selfRated ? '*' : ''}</span></div></div>`;
     }).join('');
-    v.innerHTML = `<div class="card"><div class="row between center"><h2>History</h2><span class="muted small">${all.length} drills · * = self-rated</span></div></div>
-      <div class="gal">${cells}</div>`;
-    v.onclick = (e) => { const c = e.target.closest('[data-att]'); if (c) showAttempt(all.find((x) => x.id == c.dataset.att)); };
+    // per-drill mini progress line when filtered
+    let trendCard = '';
+    if (histCat !== 'all') {
+      const t = A.stats.dailyTrend(shown.slice().reverse(), histCat);
+      if (t.length >= 2) trendCard = `<div class="card"><h2>${esc(exName(histCat))} — progress</h2>${A.charts.line(t)}</div>`;
+    }
+    v.innerHTML = `<div class="card"><div class="row between center"><h2>History</h2><span class="muted small">${shown.length} drills · * = self-rated</span></div></div>
+      <div class="chips">${chips}</div>${trendCard}
+      <div class="gal">${cells || '<div class="muted small">Nothing in this category yet.</div>'}</div>`;
+    v.onclick = (e) => {
+      const ch = e.target.closest('[data-cat]'); if (ch) { histCat = ch.dataset.cat; renderHistory(v); return; }
+      const c = e.target.closest('[data-att]'); if (c) showAttempt(all.find((x) => x.id == c.dataset.att));
+    };
   }
 
   function showAttempt(a) {
@@ -5298,6 +5745,8 @@ window.ATELIER_REFS = [{"id": "ws-lines-1", "title": "Straight lines — set 1",
           <div class="stepper"><button data-ink="-0.4">−</button><b id="inkv">${inkW.toFixed(1)}</b><button data-ink="0.4">+</button></div></div>
         <div class="setrow"><div><div>Line smoothing</div><div class="small muted">steadies shaky strokes — raise it if lines come out wobbly</div></div>
           <button class="btn ghost sm" id="smoothmode">${esc({ 0: 'Off', 0.3: 'Light', 0.5: 'Medium', 0.72: 'Strong' }[A.store.get('smooth', 0.5)] || 'Medium')}</button></div>
+        <div class="setrow"><div><div>Pace</div><div class="small muted">Relaxed stretches suggested study &amp; draw times by 50%</div></div>
+          <button class="btn ghost sm" id="pacemode">${A.store.get('pace', 'standard') === 'relaxed' ? 'Relaxed' : 'Standard'}</button></div>
         <div class="setrow"><div><div>Sighting guides</div><div class="small muted">plumb line, horizon, thirds, angle ticks</div></div>
           <button class="btn ghost sm" id="guidesmode">${esc({ auto: 'Auto (fades)', on: 'Always on', off: 'Off' }[A.store.get('guidesMode', 'auto')])}</button></div>
         <div class="setrow"><div><div>Introduction</div><div class="small muted">replay the welcome guide</div></div>
@@ -5334,6 +5783,7 @@ window.ATELIER_REFS = [{"id": "ws-lines-1", "title": "Straight lines — set 1",
     $('#sw-pencil', v).onclick = () => { A.store.set('pencilOnly', !pencilOnly); surface.opts.pencilOnly = !pencilOnly; renderSettings(v); };
     $('#guidesmode', v).onclick = () => { const cur = A.store.get('guidesMode', 'auto'); const nxt = { auto: 'on', on: 'off', off: 'auto' }[cur]; A.store.set('guidesMode', nxt); renderSettings(v); };
     $('#smoothmode', v).onclick = () => { const cur = A.store.get('smooth', 0.5); const nxt = { 0: 0.3, 0.3: 0.5, 0.5: 0.72, 0.72: 0 }[cur]; A.store.set('smooth', nxt == null ? 0.5 : nxt); surface.opts.smooth = A.store.get('smooth', 0.5); renderSettings(v); };
+    $('#pacemode', v).onclick = () => { A.store.set('pace', A.store.get('pace', 'standard') === 'relaxed' ? 'standard' : 'relaxed'); renderSettings(v); };
     $('#replayintro', v).onclick = () => showOnboarding();
     $('#export', v).onclick = exportBackup;
     $('#import', v).onchange = importBackup;
@@ -5449,8 +5899,8 @@ window.ATELIER_REFS = [{"id": "ws-lines-1", "title": "Straight lines — set 1",
   'use strict';
   // Stamped by build/build.js: A.VERSION from build/version.json, A.BUILD from
   // the build clock (YYMMDD.HHMM). These literals are only the un-built dev fallback.
-  A.VERSION = '1.6.0';
-  A.BUILD = '260705.2320';
+  A.VERSION = '1.7.0';
+  A.BUILD = '260706.0631';
   function boot() {
     try { A.ui.init(); }
     catch (e) {

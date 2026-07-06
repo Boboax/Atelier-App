@@ -49,6 +49,10 @@
     this.measures = [];         // [{a:[x,y], b:[x,y]}] in design coords; measures[0] = the unit
     this._curMeasure = null;
     this.locked = false;        // set by the drill: no marks during STUDY/ESTIMATE
+    this.view = { z: 1, tx: 0, ty: 0 };   // pinch zoom/pan (two-finger touch)
+    this.onViewChange = null;   // notified when zoom starts/ends (UI reset button)
+    this._touchPts = new Map(); // live touch positions (for pinch), independent of drawing
+    this._pinch = null;
     this._penSeen = 0;
     this._drawing = false;
     this._cur = null;
@@ -131,15 +135,22 @@
     try { this.canvas.setPointerCapture && this.canvas.setPointerCapture(e.pointerId); } catch (_) {}
   };
 
+  // client coords → CONTENT CSS px (inverting the pinch view transform)
+  Surface.prototype._content = function (clientX, clientY) {
+    const r = this._rect || this.canvas.getBoundingClientRect();
+    const v = this.view;
+    return [(clientX - r.left - v.tx) / v.z, (clientY - r.top - v.ty) / v.z];
+  };
+
   // event → [designX, designY, smoothedPressure]
   Surface.prototype._pt = function (e, first) {
-    const r = this._rect || this.canvas.getBoundingClientRect();
     let pr = e.pressure;
     if (e.pointerType !== 'pen' || pr === 0 || pr == null) pr = 0.5; // fallback
     // EMA: Pencil pressure is noisy at coalesced rates — smooth it so the
     // stroke width tapers instead of banding
     this._emaP = first ? pr : (0.35 * pr + 0.65 * this._emaP);
-    const raw = this.toDesign([e.clientX - r.left, e.clientY - r.top]);
+    const c = this._content(e.clientX, e.clientY);
+    const raw = this.toDesign(c);
     // positional stabiliser: ease the point toward the pen so hand jitter is
     // damped (k=1 raw, lower k = smoother). Makes straight/curved lines cleaner.
     const k = this._posK == null ? 1 : this._posK;
@@ -149,8 +160,53 @@
   };
 
   Surface.prototype._design = function (e) {
+    return this.toDesign(this._content(e.clientX, e.clientY));
+  };
+
+  /* ---- pinch zoom & pan (two-finger touch; pen keeps drawing) ------------ */
+  Surface.prototype._clampView = function () {
+    const v = this.view;
+    v.z = Math.max(1, Math.min(6, v.z));
+    v.tx = Math.max(this.cssW * (1 - v.z), Math.min(0, v.tx));
+    v.ty = Math.max(this.cssH * (1 - v.z), Math.min(0, v.ty));
+    if (v.z < 1.02) { v.z = 1; v.tx = 0; v.ty = 0; }
+  };
+  Surface.prototype.resetView = function () {
+    this.view = { z: 1, tx: 0, ty: 0 };
+    this.redraw();
+    if (this.onViewChange) this.onViewChange(1);
+  };
+  Surface.prototype._maybeStartPinch = function () {
+    if (this._touchPts.size !== 2) return;
+    // a young accidental touch stroke gives way to the pinch (Procreate-style)
+    if (this._drawing && this._cur && this._cur.pts.length < 12) {
+      this.strokes.pop(); this._undoStack.pop();
+      this._drawing = false; this._cur = null; this._activeId = null; this._predicted = null;
+    }
+    if (this._drawing) return;                 // pen stroke in progress — pen wins
+    const pts = Array.from(this._touchPts.values());
     const r = this._rect || this.canvas.getBoundingClientRect();
-    return this.toDesign([e.clientX - r.left, e.clientY - r.top]);
+    this._pinch = {
+      d0: Math.max(8, Math.hypot(pts[0][0] - pts[1][0], pts[0][1] - pts[1][1])),
+      z0: this.view.z, tx0: this.view.tx, ty0: this.view.ty,
+      m0: [(pts[0][0] + pts[1][0]) / 2 - r.left, (pts[0][1] + pts[1][1]) / 2 - r.top]
+    };
+  };
+  Surface.prototype._doPinch = function () {
+    const p = this._pinch; if (!p || this._touchPts.size < 2) return;
+    const pts = Array.from(this._touchPts.values());
+    const r = this._rect || this.canvas.getBoundingClientRect();
+    const d = Math.max(8, Math.hypot(pts[0][0] - pts[1][0], pts[0][1] - pts[1][1]));
+    const m = [(pts[0][0] + pts[1][0]) / 2 - r.left, (pts[0][1] + pts[1][1]) / 2 - r.top];
+    const z = p.z0 * d / p.d0;
+    // keep the content point that started under the fingers anchored to them
+    const cx = (p.m0[0] - p.tx0) / p.z0, cy = (p.m0[1] - p.ty0) / p.z0;
+    this.view.z = z;
+    this.view.tx = m[0] - cx * this.view.z;
+    this.view.ty = m[1] - cy * this.view.z;
+    this._clampView();
+    this._scheduleFull();
+    if (this.onViewChange) this.onViewChange(this.view.z);
   };
   // displayed rect of the current ghost image, in design coords (0..1 of the box)
   Surface.prototype.ghostRectDesign = function () {
@@ -174,7 +230,7 @@
 
   // remove stroke points within the eraser radius, splitting strokes as needed
   Surface.prototype._eraseAt = function (p) {
-    const R = this.eraseR / (this.box.s || 1), R2 = R * R, out = [];
+    const R = this.eraseR / ((this.box.s || 1) * (this.view.z || 1)), R2 = R * R, out = [];
     for (const s of this.strokes) {
       let run = [];
       for (const pt of s.pts) {
@@ -195,6 +251,12 @@
   Surface.prototype.clearMeasures = function () { this.measures = []; this._curMeasure = null; this.redraw(); };
 
   Surface.prototype._down = function (e) {
+    // pinch tracking is independent of drawing/palm logic: any second finger
+    // starts a zoom, even in pencil-only mode (touch never inks there anyway)
+    if (e.pointerType === 'touch') {
+      this._touchPts.set(e.pointerId, [e.clientX, e.clientY]);
+      if (this._touchPts.size === 2) { e.preventDefault(); this._maybeStartPinch(); if (this._pinch) return; }
+    }
     if (this._activeId != null) return;       // one pointer owns the surface at a time
     if (!this._drawing && !this._cropping) this._measure();   // refresh rect (layout may have settled)
     if (this.measureMode) {
@@ -240,6 +302,10 @@
 
   Surface.prototype._move = function (e) {
     if (e.pointerType === 'pen') this._penSeen = performance.now();  // palm guard mid-stroke
+    if (e.pointerType === 'touch' && this._touchPts.has(e.pointerId)) {
+      this._touchPts.set(e.pointerId, [e.clientX, e.clientY]);
+      if (this._pinch) { e.preventDefault(); this._doPinch(); return; }
+    }
     if (this._activeId != null && e.pointerId !== this._activeId) return;
     if (this._measuring) { e.preventDefault(); this._curMeasure.b = this._design(e); this._scheduleFull(); return; }
     if (this._cropping) { e.preventDefault(); this.cropRect[1] = this._design(e); this._scheduleFull(); return; }
@@ -269,6 +335,15 @@
   };
 
   Surface.prototype._up = function (e, cancelled) {
+    if (e && e.pointerType === 'touch') {
+      this._touchPts.delete(e.pointerId);
+      if (this._pinch && this._touchPts.size < 2) {
+        this._pinch = null;
+        this._clampView(); this._scheduleFull();
+        if (this.onViewChange) this.onViewChange(this.view.z);
+        return;
+      }
+    }
     if (this._activeId != null && e && e.pointerId != null && e.pointerId !== this._activeId) return;
     // release pointer capture so the NEXT tap reaches the buttons (not the canvas) —
     // otherwise the first tap after a stroke is swallowed and you must tap twice.
@@ -322,7 +397,9 @@
 
   Surface.prototype._setStrokeTransform = function (ctx) {
     const r = this._rect || this.canvas.getBoundingClientRect();
-    ctx.setTransform(this.canvas.width / (r.width || 1), 0, 0, this.canvas.height / (r.height || 1), 0, 0);
+    const sx = this.canvas.width / (r.width || 1), sy = this.canvas.height / (r.height || 1);
+    const v = this.view;   // pinch zoom/pan composes on top of the DPR mapping
+    ctx.setTransform(sx * v.z, 0, 0, sy * v.z, sx * v.tx, sy * v.ty);
   };
   Surface.prototype._segWidth = function (a, b) {
     const p = ((a[2] == null ? 0.5 : a[2]) + (b[2] == null ? 0.5 : b[2])) / 2;
@@ -365,6 +442,8 @@
     this.erasing = false; this._erasingActive = false; this._erasePt = null;
     this.measureMode = false; this.measures = []; this._curMeasure = null; this._measuring = false;
     this._undoStack = [];
+    this.view = { z: 1, tx: 0, ty: 0 }; this._pinch = null;
+    if (this.onViewChange) this.onViewChange(1);
     this.redraw();
   };
   Surface.prototype.setTarget = function (t) { this.target = t; this.redraw(); };
@@ -405,6 +484,13 @@
         const a = this.toPx(ln[0]), b = this.toPx(ln[1]);
         ctx.beginPath(); ctx.moveTo(a[0], a[1]); ctx.lineTo(b[0], b[1]); ctx.stroke();
       }
+    } else if (t.kind === 'shade') {
+      // reveal: the true terminator over the user's marks (contour is drawn
+      // separately in redraw so it's visible in every phase)
+      ctx.beginPath();
+      const s0 = this.toPx(t.polyline[0]); ctx.moveTo(s0[0], s0[1]);
+      for (let i = 1; i < t.polyline.length; i++) { const p = this.toPx(t.polyline[i]); ctx.lineTo(p[0], p[1]); }
+      ctx.stroke();
     } else if (t.kind === 'gesture') {
       // head + mass ovals only during STUDY (they make it read as a figure);
       // the line of action is the thing memorised, redrawn and scored
@@ -457,6 +543,39 @@
         ctx.moveTo(a[0], a[1]); ctx.lineTo(b[0], b[1]); ctx.stroke();
       }
     }
+    ctx.restore();
+  };
+
+  // the terminator drill's form: bare contour in every phase (you place the
+  // shadow ON the form); during STUDY, a lit rendering with a clear core-shadow
+  // edge — the thing to memorise.
+  Surface.prototype._drawShadeForm = function (ctx, study) {
+    const t = this.target; if (!t || t.kind !== 'shade') return;
+    const path = (pts, close) => {
+      ctx.beginPath();
+      const p0 = this.toPx(pts[0]); ctx.moveTo(p0[0], p0[1]);
+      for (let i = 1; i < pts.length; i++) { const p = this.toPx(pts[i]); ctx.lineTo(p[0], p[1]); }
+      if (close) ctx.closePath();
+    };
+    ctx.save();
+    if (study) {
+      const f = t.form, L = t.light;
+      const c = this.toPx([f.cx, f.cy]);
+      const R = Math.max(f.rx, f.ry) * this.box.s;
+      // lit-side highlight: offset radial gradient inside the silhouette
+      path(t.contour, true); ctx.save(); ctx.clip();
+      const hx = c[0] + L.x * R * 0.45, hy = c[1] + L.y * R * 0.45;
+      const grad = ctx.createRadialGradient(hx, hy, R * 0.08, c[0], c[1], R * 1.25);
+      grad.addColorStop(0, '#ffffff'); grad.addColorStop(0.55, '#e9e2d4'); grad.addColorStop(1, '#c9c1b0');
+      ctx.fillStyle = grad; ctx.fillRect(c[0] - R * 2, c[1] - R * 2, R * 4, R * 4);
+      // core shadow beyond the terminator — the boundary being memorised
+      path(t.shadow, true); ctx.fillStyle = 'rgba(64,54,42,0.34)'; ctx.fill();
+      ctx.restore();
+    }
+    // the bare form contour (all phases)
+    path(t.contour, true);
+    ctx.strokeStyle = study ? 'rgba(0,0,0,0.5)' : 'rgba(0,0,0,0.35)';
+    ctx.lineWidth = 1.6; ctx.stroke();
     ctx.restore();
   };
 
@@ -553,8 +672,11 @@
     // reference ghost (study or self-check)
     if (this.ghost) this._drawGhost(ctx, this.ghostStudy ? 1 : this.ghost.opacity);
 
-    // generated target during STUDY (worksheet-grey)
-    if (this.showTarget && this.target) {
+    // terminator drill: the form itself is always visible (shaded during study)
+    if (this.target && this.target.kind === 'shade') {
+      this._drawShadeForm(ctx, this.showTarget);
+    } else if (this.showTarget && this.target) {
+      // generated target during STUDY (worksheet-grey)
       this._drawTargetGeom(ctx, 'rgba(0,0,0,0.55)', 'rgba(0,0,0,0.10)', 2.5);
     }
 
@@ -570,7 +692,7 @@
     if (this.erasing && this._erasePt) {
       const c = this.toPx(this._erasePt);
       ctx.save(); ctx.strokeStyle = 'rgba(0,0,0,0.4)'; ctx.lineWidth = 1.5;
-      ctx.beginPath(); ctx.arc(c[0], c[1], this.eraseR, 0, Math.PI * 2); ctx.stroke(); ctx.restore();
+      ctx.beginPath(); ctx.arc(c[0], c[1], this.eraseR / (this.view.z || 1), 0, Math.PI * 2); ctx.stroke(); ctx.restore();
     }
     // comparative-measurement calipers (above marks, below crop UI)
     if (this.measures.length || this._curMeasure) this._drawMeasures(ctx);

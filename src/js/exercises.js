@@ -108,8 +108,12 @@
     // retrieval is the desirable difficulty.
     this.enforced = this.def.scored && this.level >= 4;
     this.selfPaced = !this.enforced;
-    this.studyCap = this.def.scored ? A.curr.studySeconds(this.exKey)
-                                    : (this.ref && this.ref.studySec) || this.def.study();
+    // pace preference: 'relaxed' stretches the suggested study/draw times by 50%
+    // for learners who find the adaptive defaults rushed — the science stays the
+    // same (glances still shrink with level), just on a gentler clock
+    const pace = A.store.get('pace', 'standard') === 'relaxed' ? 1.5 : 1;
+    this.studyCap = Math.round((this.def.scored ? A.curr.studySeconds(this.exKey)
+                                    : (this.ref && this.ref.studySec) || this.def.study()) * pace);
     this.studySec = this.studyCap;
     this.studyRemaining = this.studyCap;
     this.studyElapsed = 0;
@@ -189,7 +193,8 @@
     this.stage = 0;
     // recall budget: soft target for committing the marks before the memory trace
     // fades (scored drills only — reference copies are deliberately unhurried)
-    this.drawBudget = this.def.scored ? (this.def.draw || null) : null;
+    const dpace = A.store.get('pace', 'standard') === 'relaxed' ? 1.5 : 1;
+    this.drawBudget = this.def.scored ? (this.def.draw ? Math.round(this.def.draw * dpace) : null) : null;
     this.drawElapsed = 0;
     this.drawStart = performance.now();
     this._startDrawTimer();
@@ -241,7 +246,7 @@
 
   Drill.prototype.canEvaluate = function () {
     if (this.surface.isEmpty()) return false;
-    if (this.exKey === 'line' || this.exKey === 'curve' || this.exKey === 'gesture') return this.surface.totalPoints() >= 2;
+    if (this.exKey === 'line' || this.exKey === 'curve' || this.exKey === 'gesture' || this.exKey === 'shade') return this.surface.totalPoints() >= 2;
     if (this.exKey === 'polygon' || this.exKey === 'envelope') return this.surface.totalPoints() >= 3;
     return true;
   };
@@ -275,6 +280,11 @@
         r = A.geom.scoreCurve(this.target.polyline, this.surface.pointsDesign());
       } else if (this.exKey === 'gesture') {
         r = A.geom.scoreCurve(this.target.loa, this.surface.pointsDesign());
+      } else if (this.exKey === 'shade') {
+        // POSITION matters: the shadow line must sit in the right place ON the
+        // form, so no endpoint alignment; deviation scaled by the form's radius
+        const f = this.target.form;
+        r = A.geom.scoreCurveFixed(this.target.polyline, this.surface.pointsDesign(), Math.max(f.rx, f.ry) * 2);
       } else {
         // score from ALL strokes combined (a shape drawn in several strokes is fine)
         r = A.geom.scoreShape(this.target.polygon, this.surface.pointsDesign());

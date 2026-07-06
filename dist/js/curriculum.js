@@ -41,6 +41,9 @@
     { key: 'gesture', name: 'Gesture (Line of Action)', module: 3, scored: true,
       blurb: 'Capture a pose’s line of action from memory — one flowing line through the whole figure.',
       study: (l) => clamp(Math.round(10 - l), 2, 10), draw: 20, maxLevel: 9 },
+    { key: 'shade', name: 'Terminator (Light & Shadow)', module: 4, scored: true,
+      blurb: 'Study a lit form, then draw the shadow line — where light turns to dark — from memory, on the bare form.',
+      study: (l) => clamp(Math.round(14 - l), 3, 14), draw: 25, maxLevel: 9 },
     { key: 'contour', name: 'Contour (Edges)', module: 4, scored: false, refCat: 'any',
       blurb: 'Trace one edge slowly from memory — eyes on the form, building edge-perception.',
       study: () => 40, draw: null, maxLevel: 1 },
@@ -50,8 +53,8 @@
     { key: 'bargue', name: 'Bargue Block-In', module: 4, scored: false, refCat: 'bargue',
       blurb: 'Study a plate’s block-in, draw the envelope from memory, then ghost it back.',
       study: () => 45, draw: null, maxLevel: 1 },
-    { key: 'value', name: 'Value / Terminator', module: 4, scored: false, refCat: 'any',
-      blurb: 'The lit-egg drill: memorise the shadow line, then draw it from memory.',
+    { key: 'value', name: 'Value study (photo)', module: 4, scored: false, refCat: 'any',
+      blurb: 'The same shadow-line drill on a photo of a real lit object — import your own egg/cast photos.',
       study: () => 60, draw: null, maxLevel: 1 },
     { key: 'master', name: 'Master Copy', module: 4, scored: false, refCat: 'any',
       blurb: 'Lecoq’s Louvre exercise — study a whole image, draw it from memory.',
@@ -74,7 +77,7 @@
       { n: 1, name: 'Lines, Angles & Curves', note: 'Length, angle and the bow of a curve — the foundation of all measurement.' },
       { n: 2, name: 'Polygons', note: 'Closed shapes and internal proportion.' },
       { n: 3, name: 'Envelopes & Gesture', note: 'Organic form blocked in with straight lines, and the figure’s line of action.' },
-      { n: 4, name: 'Real Subjects', note: 'Negative space, Bargue plates, value, master copies.' }
+      { n: 4, name: 'Value & Real Subjects', note: 'Light and shadow, negative space, Bargue plates, master copies.' }
     ],
 
     _state() { return A.store.get('curriculum', {}); },

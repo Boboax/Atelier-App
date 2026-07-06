@@ -13,6 +13,7 @@
     const t = att.target; if (!t) return { lines: [], polys: [], curves: [] };
     if (t.kind === 'line' || t.kind === 'angles') return { lines: t.lines, polys: [], curves: [] };
     if (t.kind === 'gesture' && t.loa) return { lines: [], polys: [], curves: [t.loa] };
+    if (t.kind === 'shade') return { lines: [], polys: t.contour ? [t.contour] : [], curves: [t.polyline] };
     if (t.polyline) return { lines: [], polys: [], curves: [t.polyline] };
     if (t.polygon) return { lines: [], polys: [t.polygon], curves: [] };
     return { lines: [], polys: [], curves: [] };

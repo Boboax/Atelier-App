@@ -227,6 +227,8 @@ button{font-family:inherit;touch-action:manipulation}
   display:flex;gap:10px;justify-content:center;align-items:center;
   background:linear-gradient(rgba(255,255,255,0),#fff 40%)}
 #drill .controls .btn{box-shadow:var(--shadow)}
+/* pinch-zoom reset chip: floats above the drill controls */
+#d-zoomreset{position:absolute;right:14px;bottom:calc(env(safe-area-inset-bottom) + 96px);z-index:7;box-shadow:var(--shadow)}
 .closeX{position:absolute;top:calc(env(safe-area-inset-top) + 8px);right:10px;z-index:6;
   background:rgba(0,0,0,.05);border:0;border-radius:50%;width:44px;height:44px;font-size:18px;cursor:pointer;color:var(--ink)}
 @media (prefers-color-scheme: dark){.closeX{background:rgba(255,255,255,.08)}}

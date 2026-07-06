@@ -24,6 +24,10 @@
         if (m.iou != null && m.iou < 0.6) return 'Follow the bend more closely — pin the start, end and apex (furthest bow) first.';
         return 'Nice curve — smooth and close to the path.';
       }
+      if (exKey === 'shade') {
+        if (m.iou != null && m.iou < 0.7) return 'Find where the form turns from the light — place the boundary first, then follow its bow.';
+        return 'Well placed — you saw where the form turns away from the light.';
+      }
       if (exKey === 'gesture') {
         if (m.iou != null && m.iou < 0.7) return 'Find the main sweep — one long line head to foot. Push the curve rather than tracing the outline.';
         return 'Strong line of action — you caught the pose’s rhythm.';
@@ -75,6 +79,9 @@
       apex: { icon: '⌒', title: 'Pin the anchors, then the bow',
         why: 'A curve is fully described by its two endpoints and its apex — the furthest point it departs from the straight line between them. Fix those three and the curve almost draws itself.',
         how: 'Before the sweep, mark start, end, and where (and how far) it bows out. Draw through those points in one unhurried stroke rather than feeling your way along the edge.' },
+      terminator: { icon: '◑', title: 'The terminator follows the form',
+        why: 'The shadow line isn’t an outline you copy — it’s where the surface turns away from the light. Its position is set by the light direction; its curve is set by the form. Misplacing it flattens the volume instantly.',
+        how: 'First ask: where does the light come from? The terminator sits roughly a quarter-turn around from it. Then let its bow follow the form’s roundness — straighter on a cylinder, fuller on a sphere. Place, then curve.' },
       loa: { icon: '⟋', title: 'One line through the whole figure',
         why: 'A pose reads as a single rhythmic line — the line of action — before any anatomy. Catching that flow first is what makes a gesture feel alive instead of stiff, and it’s the first mark every figure artist makes.',
         how: 'Draw the longest continuous line from the head down the spine to the weight-bearing foot in one stroke. Push the curve a little further than you think you see — a gesture exaggerates the rhythm.' },
@@ -97,6 +104,8 @@
         if (m.iou != null && m.iou < 0.75) return coach.PRINCIPLES.apex;
       } else if (exKey === 'gesture') {
         if (m.iou != null && m.iou < 0.8) return coach.PRINCIPLES.loa;
+      } else if (exKey === 'shade') {
+        if (m.iou != null && m.iou < 0.8) return coach.PRINCIPLES.terminator;
       } else {   // polygon / envelope
         if (m.aspectErrPct != null && Math.abs(m.aspectErrPct) >= 8) return coach.PRINCIPLES.proportion;
         if (m.iou != null && m.iou < 0.75) return coach.PRINCIPLES.envelope;

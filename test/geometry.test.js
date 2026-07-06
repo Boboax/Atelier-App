@@ -117,6 +117,33 @@ test('gesture: level 1 offers only the simplest poses, level 9 the full set', ()
   for (let lv = 1; lv <= 9; lv++) assert.ok(gen.gesture(lv).loa.length > 3, 'level ' + lv);
 });
 
+test('scoreCurveFixed: position matters (terminator drill)', () => {
+  const g = load().geom;
+  const T = [[0.4, 0.35], [0.45, 0.5], [0.4, 0.65]];      // a bow on the left of a form
+  assert.equal(g.scoreCurveFixed(T, T.map((p) => p.slice()), 0.5).score, 100);
+  const shifted = T.map((p) => [p[0] + 0.25, p[1]]);       // same bow, wrong place
+  assert.ok(g.scoreCurveFixed(T, shifted, 0.5).score < 60, 'misplaced terminator must score low: ' + g.scoreCurveFixed(T, shifted, 0.5).score);
+  const near = T.map((p) => [p[0] + 0.02, p[1]]);
+  assert.ok(g.scoreCurveFixed(T, near, 0.5).score >= 85, 'a near miss stays high');
+  assert.equal(g.scoreCurveFixed(T, [[0.5, 0.5], [0.5, 0.5]], 0.5).score, 0, 'tap = 0');
+});
+
+test('shade generator: valid forms, terminator on the form, shadow polygon closed', () => {
+  const gen = load().gen;
+  for (let i = 0; i < 300; i++) {
+    const t = gen.shade(1 + (i % 9));
+    assert.equal(t.kind, 'shade');
+    assert.ok(t.polyline.length >= 10, 'terminator sampled');
+    assert.ok(t.contour.length >= 24, 'contour sampled');
+    assert.ok(t.shadow.length > t.polyline.length, 'shadow region includes the arc back');
+    const all = t.polyline.concat(t.contour, t.shadow);
+    assert.ok(all.every((p) => isFinite(p[0]) && isFinite(p[1])), 'finite');
+    // terminator endpoints sit on (or very near) the contour
+    const onC = (pt) => t.contour.some((c) => Math.hypot(c[0] - pt[0], c[1] - pt[1]) < 0.08);
+    assert.ok(onC(t.polyline[0]) && onC(t.polyline[t.polyline.length - 1]), 'terminator spans the form');
+  }
+});
+
 test('generators: no NaN, polygons valid, scores in range (fuzz 2400)', () => {
   const A = load();
   const g = A.geom, gen = A.gen;
