@@ -19,6 +19,15 @@ No feature reaches `main` without a version bump.
 
 ---
 
+## 1.9.0 — The string you can carry
+
+The sight-size string now works like the real thing — a taut string in two outstretched hands:
+
+- **Carry it**: stretch the string along an edge on the plate, then grab its **middle** and drag — it translates rigidly, angle and length locked, over to your copy to compare against the corresponding edge.
+- **Re-aim it**: grab an **end handle** to adjust that end (new angle/length).
+- **Read it**: the measured span renders solid with dot handles (the sight-line still extends dashed across both panels), and the readout now shows **angle + length** ("34.2° · 41%"). The panels are 1:1, so the same % *is* the same true length on both sides.
+- Lay a new string by dragging on empty canvas; a tap on empty canvas clears it; a tap on the string leaves it (it was a grab). New `geom.distToSeg` helper with guard tests backs the grab detection.
+
 ## 1.8.1 — The practice day ends at 4 AM
 
 Fixes the after-midnight session stealing the next day's plan: practising in bed at 00:30 marked *tomorrow's* plan done and ticked its streak day.
