@@ -44,6 +44,16 @@ iPad with the Apple Pencil after each install. ✅ / ❌ / note.
 - [ ] Pick a Bargue plate / import a photo; ghost overlay + opacity slider work; Flip rotates 180°.
 - [ ] **Auto-score**: threshold slider + Invert isolate the subject; "overlap %" + score update live; coverage warning shows when the mask is clearly wrong. (Expect it to work well only on clean, single-subject images — the multi-panel plates won't mask cleanly.)
 
+## Sight-size (new in 1.8.0)
+- [ ] Practice → Module 4 → **Sight-Size Copy** → pick a plate → **two side-by-side panels** appear, plate left, paper right, same size; drawing works only on the paper.
+- [ ] **Flick** flashes the plate over your drawing for a beat, then it fades — long enough to spot a difference, short enough not to trace from.
+- [ ] **Step back** zooms both panels out on a desk-tone surround; drawing is disabled; **tapping anywhere walks you back in** (and the Pencil doesn't leave a mark on that tap).
+- [ ] **String**: drag a line — it extends across BOTH panels with a live angle readout ("level" when near 0°); a tap clears it; toggling String off removes it. Normal drawing resumes after toggling off.
+- [ ] After ~a dozen marks without stepping back, the instructor nudges **"Step back — judge the whole"**; stepping back resets it.
+- [ ] **Score ›** goes through the usual estimate step, then shows contour match + **placement ←→/↕ + size** with directions that match what you see (drew it too low → says "too low").
+- [ ] **Refine the copy ›** returns to the same drawing (marks kept) for another pass; Done closes.
+- [ ] Pinch zoom still works inside sight-size (lean in on the plate detail); rotate the iPad mid-copy — panels re-layout, marks stay put.
+
 ## Library, stats, history, backup
 - [ ] Import a photo from the iPad → appears in **My references**; delete works.
 - [ ] Stats charts render; calibration/self-awareness/perception cards appear once you have data.

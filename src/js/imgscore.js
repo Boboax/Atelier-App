@@ -162,8 +162,51 @@
     return { score, iou: +(score / 100).toFixed(3), method: 'edge' };
   }
 
+  // boundary pixels of a mask (works for filled photos AND line-art alike:
+  // a line's pixels are all boundary; a silhouette reduces to its outline)
+  function edgePoints(mask, cap) {
+    const pts = [];
+    for (let y = 0; y < G; y++) for (let x = 0; x < G; x++) {
+      const i = y * G + x;
+      if (!mask[i]) continue;
+      if (x === 0 || y === 0 || x === G - 1 || y === G - 1 ||
+          !mask[i - 1] || !mask[i + 1] || !mask[i - G] || !mask[i + G]) pts.push([x / G, y / G]);
+    }
+    if (cap && pts.length > cap) { const step = Math.ceil(pts.length / cap); return pts.filter((_, i) => i % step === 0); }
+    return pts;
+  }
+
   const imgScore = {
     autoThreshold,
+
+    /* ---- sight-size scoring ------------------------------------------------
+       The reference panel and the drawing panel share one coordinate system at
+       1:1, so unlike the memory drills NOTHING is normalised away: the drawing
+       is compared to the reference IN PLACE. Placement, size and proportion
+       errors all count — exactly what the sight-size method disciplines.
+       Also reports the actionable errors a teacher would name: where the copy
+       sits (dx/dy) and how its size compares (sizeErrPct).                   */
+    sightScore(img, strokesDesign) {
+      if (!img || !strokesDesign || !strokesDesign.length) return { score: 0, iou: 0, metrics: {} };
+      const auto = autoThreshold(img, null);
+      const mask = maskFromImage(img, auto.threshold, auto.invert, null);
+      const E = edgePoints(mask, 600);
+      let U = [];
+      for (const s of strokesDesign) for (const p of s) U.push([p[0], p[1]]);
+      if (U.length > 500) { const step = Math.ceil(U.length / 500); U = U.filter((_, i) => i % step === 0); }
+      if (E.length < 8 || U.length < 4) return { score: 0, iou: 0, metrics: {} };
+      const mn = (A2, B2) => { let s = 0; for (const p of A2) { let m = 1e9; for (const q of B2) { const dx = p[0] - q[0], dy = p[1] - q[1], dd = dx * dx + dy * dy; if (dd < m) m = dd; } s += Math.sqrt(m); } return s / A2.length; };
+      const ch = 0.6 * mn(U, E) + 0.4 * mn(E, U);
+      const score = Math.round(Math.max(0, Math.min(100, 100 - ch * 480)));
+      // placement + size read directly off the two bounding boxes
+      const bbOf = (pts) => { let a = 1e9, b = 1e9, c = -1e9, d = -1e9; for (const p of pts) { if (p[0] < a) a = p[0]; if (p[0] > c) c = p[0]; if (p[1] < b) b = p[1]; if (p[1] > d) d = p[1]; } return { cx: (a + c) / 2, cy: (b + d) / 2, diag: Math.hypot(c - a, d - b) }; };
+      const be = bbOf(E), bu = bbOf(U);
+      const dx = +((bu.cx - be.cx) * 100).toFixed(1);        // % of panel; + = right
+      const dy = +((bu.cy - be.cy) * 100).toFixed(1);        // + = low
+      const sizeErrPct = be.diag ? +(((bu.diag / be.diag) - 1) * 100).toFixed(1) : 0;
+      return { score, iou: +(score / 100).toFixed(3),
+               metrics: { iou: +(score / 100).toFixed(3), dx, dy, sizeErrPct } };
+    },
     // returns {iou, score, coverage, method}. Auto-selects: a filled subject is
     // scored by silhouette overlap; a line-art plate by edge/contour matching.
     score(img, strokesDesign, threshold, invert, region) {

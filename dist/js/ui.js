@@ -363,8 +363,11 @@
     const groups = A.curr.modules.map((m) => {
       const exs = A.curr.EXERCISES.filter((e) => e.module === m.n);
       const rows = exs.map((e) => {
-        const lvl = e.scored ? `Lv ${A.curr.level(e.key)} · ${A.curr.studySeconds(e.key)}s study` : `${e.study()}s study`;
-        const tag = e.scored ? '<span class="tag">scored</span>' : '<span class="tag self">self-check</span>';
+        // sight-size is a reference drill but objectively scored, and has no study
+        // timer — the plate stays in view the whole time
+        const lvl = e.scored ? `Lv ${A.curr.level(e.key)} · ${A.curr.studySeconds(e.key)}s study`
+          : e.key === 'sightsize' ? 'unhurried · exact score' : `${e.study()}s study`;
+        const tag = (e.scored || e.key === 'sightsize') ? '<span class="tag">scored</span>' : '<span class="tag self">self-check</span>';
         return `<div class="exrow" data-ex="${e.key}">
           <div class="meta"><div class="nm">${esc(e.name)} ${tag}</div>
             <div class="small muted">${esc(e.blurb)}</div>
@@ -488,6 +491,9 @@
     const zr = $('#d-zoomreset', d);
     surface.onViewChange = (z) => { zr.style.display = z > 1.02 ? 'block' : 'none'; };
     zr.addEventListener('pointerup', (e) => { e.preventDefault(); surface.resetView(); });
+    // sight-size: any step-back transition (button or tap-to-return) restarts the
+    // mark-count behind the rhythm nudge and re-renders the controls
+    surface.onStepBack = () => { if (drill && drill.exKey === 'sightsize') drill.marksSinceStepBack = 0; updateDrill(); };
     drill = new A.Drill(surface);
     drill.onState = updateDrill;
     drill.onTick = updateTimer;
@@ -502,6 +508,7 @@
     polygon: 'Fix each corner’s position relative to the others. Block the whole shape in, then check its proportion before committing.',
     envelope: 'Find the outer “envelope” first — the largest straight lines that contain the form — then facet into smaller straights and round to the true contour, noticing where the edge turns sharply versus flows. General to specific.',
     gesture: 'A figure is shown as its line of action — one flowing line through the whole pose, with the head and main masses. Memorise that line, then draw it from memory in a single sweep. It’s the rhythm you’re after, not the outline; push the curve a little.',
+    sightsize: 'The classical atelier setup: the plate sits beside your paper at the same size, and you copy it using pure eye comparison — mark, flick your eyes to the plate, correct. Step back often to judge the whole; lay the String across both panels to check an angle or alignment. Scoring is exact: placement, size and contour all count, and you can keep refining the same copy.',
     contour: 'Trace one continuous edge slowly with your eyes, then draw it from memory in a single, unhurried line. It’s about seeing the edge, not speed.',
     negative: 'Ignore the object itself — memorise only the empty shapes around and between the forms, then draw those negative shapes.',
     bargue: 'Study only the straight-line block-in stage. Draw the outer envelope from memory, then fade the plate back over your drawing to see where you drifted.',
@@ -510,9 +517,14 @@
   };
   function showHowTo(exKey) {
     const def = A.curr.def(exKey);
+    // sight-size is the one drill where looking IS the method — its rhythm line
+    // is comparison, not the study-hide-recall loop
+    const rhythm = exKey === 'sightsize'
+      ? 'The rhythm here: <b>mark → flick eyes to the plate → correct</b>, and step back before every big decision. Unlike the memory drills, constant comparison is the whole point.'
+      : 'The rhythm is always: <b>study → hide → draw from memory → reveal → correct & redraw</b>. Never peek while drawing — the struggle is where the learning happens.';
     openModal(`<h2>${esc(def ? def.name : exKey)}</h2>
       <p class="small" style="margin:8px 0">${esc(HOWTO[exKey] || '')}</p>
-      <div class="insight" style="text-align:left">The rhythm is always: <b>study → hide → draw from memory → reveal → correct & redraw</b>. Never peek while drawing — the struggle is where the learning happens.</div>
+      <div class="insight" style="text-align:left">${rhythm}</div>
       <p class="small muted" style="margin:8px 0 0"><b>The ring</b> tracks your time: while studying it fills to the suggested look length, while drawing it fills to a recall budget. It turns <span style="color:var(--warn);font-weight:600">amber</span> and pulses when you reach it — a gentle cue to move on (hide &amp; draw, or commit your marks). It’s never a hard stop; take the time you need.</p>
       <button class="btn block" data-done="1" style="margin-top:12px">Got it</button>`)
       .addEventListener('click', (e) => { if (e.target.closest('[data-done]')) closeModal(); });
@@ -825,7 +837,27 @@
       const undoBtn = `<button class="btn ghost sm" data-act="undo" ${surface.canUndo() ? '' : 'disabled'}>Undo</button>`;
       const eraseBtn = `<button class="btn ghost sm ${surface.erasing ? 'sel' : ''}" data-act="erase">Erase</button>`;
       const guidesBtn = `<button class="btn ghost sm ${surface.guides ? 'sel' : ''}" data-act="guides">Guides</button>`;
-      if (!def.scored && drill.stages) {     // guided multi-stage block-in
+      if (drill.exKey === 'sightsize') {     // side-by-side copy: compare, don't memorise
+        const scoreBtn = `<button class="btn" data-act="evaluate" ${drill.canEvaluate() ? '' : 'disabled'}>Score ›</button>`;
+        if (surface.stepBack) {
+          instr.textContent = 'Judging distance — placement and size errors show themselves. Tap the canvas to walk back in.';
+          controls.innerHTML = `<button class="btn ghost sm sel" data-act="stepback">Step back</button>${scoreBtn}`;
+        } else {
+          // step-back rhythm nudge: after a run of marks without judging the whole,
+          // steer the eye back — that IS the sight-size discipline
+          const needStep = (drill.marksSinceStepBack || 0) >= 12;
+          instr.textContent = needStep
+            ? 'Step back — judge the whole before the next mark.'
+            : (surface.stringMode
+              ? 'Drag the string across both panels — same angle on the plate and your copy?'
+              : 'Copy the plate at the same size. Rhythm: mark → flick eyes to the plate → correct.');
+          const stringBtn = `<button class="btn ghost sm ${surface.stringMode ? 'sel' : ''}" data-act="string">String</button>`;
+          controls.innerHTML = `<button class="btn ghost sm" data-act="stepback">Step back</button>
+            <button class="btn ghost sm" data-act="flick">Flick</button>${stringBtn}${measureBtns}${undoBtn}${eraseBtn}
+            <button class="btn ghost sm" data-act="clear">Clear</button>${scoreBtn}`;
+        }
+      }
+      else if (!def.scored && drill.stages) {     // guided multi-stage block-in
         const last = drill.stage >= drill.stages.length - 1;
         instr.textContent = `Stage ${drill.stage + 1}/${drill.stages.length} — ${drill.stages[drill.stage]}` + measuring;
         controls.innerHTML = `${glanceBtn}${measureBtns}${guidesBtn}${flipBtn}${undoBtn}${eraseBtn}<button class="btn ghost sm" data-act="clear">Clear</button>
@@ -853,7 +885,9 @@
       controls.innerHTML = '';
     }
     else if (drill.phase === 'reveal') {
-      if (def.scored && drill.result) revealScored(instr, controls, result);
+      // sight-size is objectively scored (placement + size + contour) even though
+      // it's a reference drill — it gets the full scored reveal, not self-rating
+      if ((def.scored || drill.exKey === 'sightsize') && drill.result) revealScored(instr, controls, result);
       else revealReference(instr, controls, result);
     }
     bindControls(controls, result);
@@ -862,7 +896,9 @@
 
   function revealScored(instr, controls, result) {
     const r = drill.result;
-    instr.textContent = 'Compare: your marks vs the target (red).';
+    instr.textContent = drill.exKey === 'sightsize'
+      ? 'Scored in place — placement, size and contour all count. Refine the same copy to close the gaps.'
+      : 'Compare: your marks vs the target (red).';
     const m = r.metrics || {};
     // repeats saw the answer; recalls are a different game — neither sets a PB
     if (!r._pb && !r.repeat && !r.recall) r._pb = A.game.personalBest(drill.exKey, r.score);
@@ -898,6 +934,13 @@
         <div class="metricline"><span>Length error</span><b>${le > 0 ? '+' : ''}${le}% ${le > 0 ? '(long)' : le < 0 ? '(short)' : ''}</b></div>`;
     } else if (drill.exKey === 'curve' || drill.exKey === 'gesture') {
       metricRows = `<div class="metricline"><span>${drill.exKey === 'gesture' ? 'Line-of-action match' : 'Curve match'}</span><b>${Math.round((m.iou || 0) * 100)}%</b></div>`;
+    } else if (drill.exKey === 'sightsize') {
+      // signed placement/size readouts — the exact corrections sight-size trains
+      const off = (v, pos, neg) => v > 0 ? `${v}% ${pos}` : v < 0 ? `${-v}% ${neg}` : 'spot on';
+      metricRows = `<div class="metricline"><span>Contour match</span><b>${Math.round((m.iou || 0) * 100)}%</b></div>
+        <div class="metricline"><span>Placement ↔</span><b>${off(m.dx || 0, 'right', 'left')}</b></div>
+        <div class="metricline"><span>Placement ↕</span><b>${off(m.dy || 0, 'low', 'high')}</b></div>
+        <div class="metricline"><span>Size</span><b>${off(m.sizeErrPct || 0, 'large', 'small')}</b></div>`;
     } else {
       metricRows = `<div class="metricline"><span>Shape match</span><b>${Math.round((m.iou || 0) * 100)}%</b></div>
         <div class="metricline"><span>Proportion error</span><b>${m.aspectErrPct > 0 ? '+' : ''}${m.aspectErrPct}% ${m.aspectErrPct > 0 ? '(wide)' : m.aspectErrPct < 0 ? '(tall)' : ''}</b></div>`;
@@ -943,7 +986,10 @@
           <div class="lc-how"><b>How:</b> ${esc(pr.how)}</div></div>`;
       };
     }
-    controls.innerHTML = drill.isRecall
+    controls.innerHTML = drill.exKey === 'sightsize'
+      ? `<button class="btn ghost sm" data-act="close">Done ›</button>
+         <button class="btn" data-act="refine">Refine the copy ›</button>`
+      : drill.isRecall
       ? `<button class="btn ghost sm" data-act="again">Study it again</button>
          <button class="btn" data-act="close" id="d-recnext">Done ›</button>`
       : `<button class="btn ghost sm" data-act="redraw">Redraw</button>
@@ -1092,6 +1138,10 @@
       else if (a === 'guides') { drill.toggleGuides(); updateDrill(); }
       else if (a === 'measure') { surface.toggleMeasure(); updateDrill(); }
       else if (a === 'clearmeasure') { surface.clearMeasures(); updateDrill(); }
+      else if (a === 'stepback') surface.toggleStepBack();   // onStepBack refreshes the UI
+      else if (a === 'flick') surface.flick();
+      else if (a === 'string') { surface.toggleString(); updateDrill(); }
+      else if (a === 'refine') drill.refineSightSize();
       else if (a === 'nextstage') drill.nextStage();
       else if (a === 'evaluate') drill.evaluate();
       else if (a === 'redraw') drill.correctAndRedraw();

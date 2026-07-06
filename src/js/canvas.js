@@ -49,8 +49,15 @@
     this.measures = [];         // [{a:[x,y], b:[x,y]}] in design coords; measures[0] = the unit
     this._curMeasure = null;
     this.locked = false;        // set by the drill: no marks during STUDY/ESTIMATE
+    this.sightSize = false;     // split layout: reference panel (left) + drawing panel (right) at 1:1
+    this.refBox = null;         // the reference panel rect (sight-size mode)
+    this.stepBack = false;      // zoomed-out judging view — drawing disabled
+    this._flickUntil = 0;       // flash the reference over the drawing (eye-flick check)
+    this.stringLine = null;     // the taut-string check: {a,b} design pts, spans both panels
+    this.stringMode = false;
     this.view = { z: 1, tx: 0, ty: 0 };   // pinch zoom/pan (two-finger touch)
     this.onViewChange = null;   // notified when zoom starts/ends (UI reset button)
+    this.onStepBack = null;     // notified on step-back enter/exit (sight-size UI refresh)
     this._touchPts = new Map(); // live touch positions (for pinch), independent of drawing
     this._pinch = null;
     this._penSeen = 0;
@@ -102,8 +109,20 @@
     const rail = window.matchMedia && window.matchMedia('(orientation:landscape) and (min-width:900px)').matches;
     const top = rail ? 10 : 72, bottom = rail ? 10 : 108;
     const availH = Math.max(80, r.height - top - bottom);
-    const s = Math.min(r.width * (rail ? 0.97 : 0.94), availH * (rail ? 0.97 : 0.98));
-    this.box = { x: (r.width - s) / 2, y: top + (availH - s) / 2, s: s };
+    if (this.sightSize) {
+      // sight-size: two equal panels side by side — reference left, drawing
+      // right, SAME scale by construction (the whole point of the method)
+      const gap = 14;
+      const s = Math.min((r.width - gap) / 2 * 0.96, availH * 0.96);
+      const mx = (r.width - 2 * s - gap) / 2;
+      const y = top + (availH - s) / 2;
+      this.refBox = { x: mx, y, s };
+      this.box = { x: mx + s + gap, y, s };
+    } else {
+      this.refBox = null;
+      const s = Math.min(r.width * (rail ? 0.97 : 0.94), availH * (rail ? 0.97 : 0.98));
+      this.box = { x: (r.width - s) / 2, y: top + (availH - s) / 2, s: s };
+    }
   };
 
   Surface.prototype.resize = function () {
@@ -135,10 +154,10 @@
     try { this.canvas.setPointerCapture && this.canvas.setPointerCapture(e.pointerId); } catch (_) {}
   };
 
-  // client coords → CONTENT CSS px (inverting the pinch view transform)
+  // client coords → CONTENT CSS px (inverting the effective view transform)
   Surface.prototype._content = function (clientX, clientY) {
     const r = this._rect || this.canvas.getBoundingClientRect();
-    const v = this.view;
+    const v = this._effView();
     return [(clientX - r.left - v.tx) / v.z, (clientY - r.top - v.ty) / v.z];
   };
 
@@ -258,7 +277,19 @@
       if (this._touchPts.size === 2) { e.preventDefault(); this._maybeStartPinch(); if (this._pinch) return; }
     }
     if (this._activeId != null) return;       // one pointer owns the surface at a time
+    // stepped back = judging distance: you can't mark from across the room —
+    // any tap walks you back to the easel instead
+    if (this.stepBack) { e.preventDefault(); this.stepBack = false; this.redraw(); if (this.onStepBack) this.onStepBack(false); return; }
     if (!this._drawing && !this._cropping) this._measure();   // refresh rect (layout may have settled)
+    if (this.stringMode) {
+      e.preventDefault();
+      this._capture(e);
+      this._activeId = e.pointerId;
+      this._stringing = true;
+      const p = this._design(e); this.stringLine = { a: p, b: p };
+      this.redraw();
+      return;
+    }
     if (this.measureMode) {
       e.preventDefault();
       this._capture(e);
@@ -307,6 +338,7 @@
       if (this._pinch) { e.preventDefault(); this._doPinch(); return; }
     }
     if (this._activeId != null && e.pointerId !== this._activeId) return;
+    if (this._stringing) { e.preventDefault(); this.stringLine.b = this._design(e); this._scheduleFull(); return; }
     if (this._measuring) { e.preventDefault(); this._curMeasure.b = this._design(e); this._scheduleFull(); return; }
     if (this._cropping) { e.preventDefault(); this.cropRect[1] = this._design(e); this._scheduleFull(); return; }
     if (this._erasingActive) {
@@ -349,6 +381,13 @@
     // otherwise the first tap after a stroke is swallowed and you must tap twice.
     try { if (e && e.pointerId != null && this.canvas.releasePointerCapture) this.canvas.releasePointerCapture(e.pointerId); } catch (_) {}
     this._activeId = null;
+    if (this._stringing) {
+      this._stringing = false;
+      if (this.stringLine && this._mlen({ a: this.stringLine.a, b: this.stringLine.b }) < 0.02) this.stringLine = null;   // a tap clears it
+      this.redraw();
+      if (this.onStrokeEnd) this.onStrokeEnd();
+      return;
+    }
     if (this._measuring) {
       this._measuring = false;
       const m = this._curMeasure; this._curMeasure = null;
@@ -395,11 +434,38 @@
     });
   };
 
+  // effective view: step-back overrides the pinch with a centered zoom-out —
+  // the digital walk-away-from-the-easel (detail filters out, structure remains)
+  Surface.prototype._effView = function () {
+    if (!this.stepBack) return this.view;
+    const z = 0.55;
+    return { z, tx: this.cssW * (1 - z) / 2, ty: this.cssH * (1 - z) / 2 };
+  };
   Surface.prototype._setStrokeTransform = function (ctx) {
     const r = this._rect || this.canvas.getBoundingClientRect();
     const sx = this.canvas.width / (r.width || 1), sy = this.canvas.height / (r.height || 1);
-    const v = this.view;   // pinch zoom/pan composes on top of the DPR mapping
+    const v = this._effView();   // pinch zoom/pan composes on top of the DPR mapping
     ctx.setTransform(sx * v.z, 0, 0, sy * v.z, sx * v.tx, sy * v.ty);
+  };
+  Surface.prototype.toggleStepBack = function () {
+    this.stepBack = !this.stepBack;
+    this.redraw();
+    if (this.onStepBack) this.onStepBack(this.stepBack);
+    return this.stepBack;
+  };
+  // eye-flick: flash the reference over the DRAWING panel for a beat — the
+  // fast subject↔drawing comparison of sight-size, without moving the eyes
+  Surface.prototype.flick = function (ms) {
+    this._flickUntil = performance.now() + (ms || 700);
+    this.redraw();
+    setTimeout(() => this.redraw(), (ms || 700) + 30);
+  };
+  Surface.prototype.toggleString = function () {
+    this.stringMode = !this.stringMode;
+    if (this.stringMode) { this.erasing = false; this.measureMode = false; }
+    else this.stringLine = null;
+    this.redraw();
+    return this.stringMode;
   };
   Surface.prototype._segWidth = function (a, b) {
     const p = ((a[2] == null ? 0.5 : a[2]) + (b[2] == null ? 0.5 : b[2])) / 2;
@@ -441,9 +507,12 @@
     this.cropMode = false; this.cropRect = null;
     this.erasing = false; this._erasingActive = false; this._erasePt = null;
     this.measureMode = false; this.measures = []; this._curMeasure = null; this._measuring = false;
+    this.sightSize = false; this.refBox = null; this.stepBack = false;
+    this.stringLine = null; this.stringMode = false; this._stringing = false; this._flickUntil = 0;
     this._undoStack = [];
     this.view = { z: 1, tx: 0, ty: 0 }; this._pinch = null;
     if (this.onViewChange) this.onViewChange(1);
+    this._measure();   // layout may switch between single-box and sight-size split
     this.redraw();
   };
   Surface.prototype.setTarget = function (t) { this.target = t; this.redraw(); };
@@ -579,20 +648,52 @@
     ctx.restore();
   };
 
-  Surface.prototype._drawGhost = function (ctx, opacity) {
+  Surface.prototype._drawGhost = function (ctx, opacity, intoBox) {
     const g = this.ghost; if (!g || !g.img) return;
+    const b = intoBox || this.box;
     const im = g.img;
     const iw = im.naturalWidth || im.width, ih = im.naturalHeight || im.height;
     if (!iw || !ih) return;
-    const s = Math.min(this.box.s / iw, this.box.s / ih);
+    const s = Math.min(b.s / iw, b.s / ih);
     const w = iw * s, h = ih * s;
-    const x = this.box.x + (this.box.s - w) / 2, y = this.box.y + (this.box.s - h) / 2;
+    const x = b.x + (b.s - w) / 2, y = b.y + (b.s - h) / 2;
     ctx.save(); ctx.globalAlpha = opacity;
     if (this.ghostFlip) {     // 180° rotation defeats symbol-recognition (Edwards)
-      const cx = this.box.x + this.box.s / 2, cy = this.box.y + this.box.s / 2;
+      const cx = b.x + b.s / 2, cy = b.y + b.s / 2;
       ctx.translate(cx, cy); ctx.rotate(Math.PI); ctx.translate(-cx, -cy);
     }
     ctx.drawImage(im, x, y, w, h); ctx.restore();
+  };
+
+  // the taut string: a straight check-line laid at ANY angle, extended across
+  // BOTH panels — compare an alignment or slope on the plate against the same
+  // place in the drawing, exactly like a string stretched between the hands.
+  // Held horizontal it is the classical level line.
+  Surface.prototype._drawString = function (ctx) {
+    const s = this.stringLine; if (!s) return;
+    const a = this.toPx(s.a), b = this.toPx(s.b);
+    const dx = b[0] - a[0], dy = b[1] - a[1];
+    const L = Math.hypot(dx, dy); if (L < 2) return;
+    const ux = dx / L, uy = dy / L;
+    const ext = (this.cssW + this.cssH) * 2;
+    ctx.save();
+    ctx.strokeStyle = 'rgba(42,107,138,0.85)'; ctx.lineWidth = 1.5; ctx.setLineDash([9, 6]);
+    ctx.beginPath();
+    ctx.moveTo(a[0] - ux * ext, a[1] - uy * ext);
+    ctx.lineTo(a[0] + ux * ext, a[1] + uy * ext);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    // angle readout (from horizontal, folded to ±90°)
+    let deg = Math.atan2(dy, dx) * 180 / Math.PI;
+    if (deg > 90) deg -= 180; if (deg <= -90) deg += 180;
+    const lab = Math.abs(deg) < 0.75 ? 'level' : deg.toFixed(1) + '°';
+    const mx = (a[0] + b[0]) / 2, my = (a[1] + b[1]) / 2 - 12;
+    ctx.font = '600 12px ui-sans-serif, system-ui, -apple-system, sans-serif';
+    const tw = ctx.measureText(lab).width + 8;
+    ctx.fillStyle = 'rgba(255,255,255,0.9)'; ctx.fillRect(mx - tw / 2, my - 9, tw, 17);
+    ctx.fillStyle = 'rgba(42,107,138,1)'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillText(lab, mx, my);
+    ctx.restore();
   };
 
   // plumb line, horizon, rule-of-thirds and a faint angle-clock ring — the
@@ -655,6 +756,12 @@
   Surface.prototype.redraw = function () {
     const ctx = this.ctx;
     ctx.save();
+    // raw clear first: when stepped back (zoomed out) the paper floats on a
+    // desk-toned surround, so the whole viewport must be painted
+    const r0 = this._rect || this.canvas.getBoundingClientRect();
+    ctx.setTransform(this.canvas.width / (r0.width || 1), 0, 0, this.canvas.height / (r0.height || 1), 0, 0);
+    ctx.fillStyle = this.stepBack ? '#dcd6c9' : '#ffffff';
+    ctx.fillRect(0, 0, this.cssW, this.cssH);
     // transform from the live displayed size (not an assumed dpr) so 1 unit = 1 CSS px
     this._setStrokeTransform(ctx);
     ctx.fillStyle = '#ffffff';
@@ -666,11 +773,22 @@
     ctx.strokeRect(this.box.x, this.box.y, this.box.s, this.box.s);
     ctx.restore();
 
+    // sight-size: the reference panel, always fully visible, same scale
+    if (this.sightSize && this.refBox) {
+      ctx.save();
+      ctx.strokeStyle = 'rgba(0,0,0,0.1)'; ctx.lineWidth = 1;
+      ctx.strokeRect(this.refBox.x, this.refBox.y, this.refBox.s, this.refBox.s);
+      ctx.restore();
+      if (this.ghost) this._drawGhost(ctx, 1, this.refBox);
+      // eye-flick: the reference flashed over the DRAWING panel for a beat
+      if (this._flickUntil > performance.now() && this.ghost) this._drawGhost(ctx, 0.45, this.box);
+    }
+
     // sighting training wheels
     if (this.guides) this._drawGuides(ctx);
 
-    // reference ghost (study or self-check)
-    if (this.ghost) this._drawGhost(ctx, this.ghostStudy ? 1 : this.ghost.opacity);
+    // reference ghost (study or self-check) — sight-size draws it in its own panel above
+    if (this.ghost && !this.sightSize) this._drawGhost(ctx, this.ghostStudy ? 1 : this.ghost.opacity);
 
     // terminator drill: the form itself is always visible (shaded during study)
     if (this.target && this.target.kind === 'shade') {
@@ -696,6 +814,8 @@
     }
     // comparative-measurement calipers (above marks, below crop UI)
     if (this.measures.length || this._curMeasure) this._drawMeasures(ctx);
+    // the taut-string check line (spans both panels)
+    if (this.stringLine) this._drawString(ctx);
     // crop selection rectangle
     if (this.cropRect) {
       const a = this.toPx(this.cropRect[0]), b = this.toPx(this.cropRect[1]);

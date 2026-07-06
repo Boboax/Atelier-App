@@ -81,3 +81,18 @@ test('plan mode: markPlanDone feeds metGoalOn regardless of minutes', () => {
   assert.equal(A.habit.markPlanDone(today), false, 'idempotent');
   assert.equal(A.habit.metGoalOn(today), true);
 });
+
+// sight-size is a reference drill with an OBJECTIVE score — it must exist in the
+// curriculum but stay out of the scored ladder (levels/promotion don't apply:
+// there is nothing to memorise faster, only a copy to make truer)
+test('sightsize: in curriculum, outside the promotion machinery', () => {
+  const { A } = freshEnv(LOGIC);
+  const d = A.curr.def('sightsize');
+  assert.ok(d, 'sightsize registered');
+  assert.equal(d.scored, false);
+  assert.equal(d.refCat, 'any');
+  const r = A.curr.recordScore('sightsize', 95, '2026-01-01');
+  assert.equal(r.changed, false, 'recordScore is a no-op for unscored drills');
+  assert.ok(!A.curr.dueDrills('2026-01-05').some((x) => x.key === 'sightsize'),
+    'never appears in the scored review queue');
+});

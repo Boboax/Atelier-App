@@ -1440,8 +1440,15 @@ window.ATELIER_REFS = [{"id": "ws-lines-1", "title": "Straight lines — set 1",
     this.measures = [];         // [{a:[x,y], b:[x,y]}] in design coords; measures[0] = the unit
     this._curMeasure = null;
     this.locked = false;        // set by the drill: no marks during STUDY/ESTIMATE
+    this.sightSize = false;     // split layout: reference panel (left) + drawing panel (right) at 1:1
+    this.refBox = null;         // the reference panel rect (sight-size mode)
+    this.stepBack = false;      // zoomed-out judging view — drawing disabled
+    this._flickUntil = 0;       // flash the reference over the drawing (eye-flick check)
+    this.stringLine = null;     // the taut-string check: {a,b} design pts, spans both panels
+    this.stringMode = false;
     this.view = { z: 1, tx: 0, ty: 0 };   // pinch zoom/pan (two-finger touch)
     this.onViewChange = null;   // notified when zoom starts/ends (UI reset button)
+    this.onStepBack = null;     // notified on step-back enter/exit (sight-size UI refresh)
     this._touchPts = new Map(); // live touch positions (for pinch), independent of drawing
     this._pinch = null;
     this._penSeen = 0;
@@ -1493,8 +1500,20 @@ window.ATELIER_REFS = [{"id": "ws-lines-1", "title": "Straight lines — set 1",
     const rail = window.matchMedia && window.matchMedia('(orientation:landscape) and (min-width:900px)').matches;
     const top = rail ? 10 : 72, bottom = rail ? 10 : 108;
     const availH = Math.max(80, r.height - top - bottom);
-    const s = Math.min(r.width * (rail ? 0.97 : 0.94), availH * (rail ? 0.97 : 0.98));
-    this.box = { x: (r.width - s) / 2, y: top + (availH - s) / 2, s: s };
+    if (this.sightSize) {
+      // sight-size: two equal panels side by side — reference left, drawing
+      // right, SAME scale by construction (the whole point of the method)
+      const gap = 14;
+      const s = Math.min((r.width - gap) / 2 * 0.96, availH * 0.96);
+      const mx = (r.width - 2 * s - gap) / 2;
+      const y = top + (availH - s) / 2;
+      this.refBox = { x: mx, y, s };
+      this.box = { x: mx + s + gap, y, s };
+    } else {
+      this.refBox = null;
+      const s = Math.min(r.width * (rail ? 0.97 : 0.94), availH * (rail ? 0.97 : 0.98));
+      this.box = { x: (r.width - s) / 2, y: top + (availH - s) / 2, s: s };
+    }
   };
 
   Surface.prototype.resize = function () {
@@ -1526,10 +1545,10 @@ window.ATELIER_REFS = [{"id": "ws-lines-1", "title": "Straight lines — set 1",
     try { this.canvas.setPointerCapture && this.canvas.setPointerCapture(e.pointerId); } catch (_) {}
   };
 
-  // client coords → CONTENT CSS px (inverting the pinch view transform)
+  // client coords → CONTENT CSS px (inverting the effective view transform)
   Surface.prototype._content = function (clientX, clientY) {
     const r = this._rect || this.canvas.getBoundingClientRect();
-    const v = this.view;
+    const v = this._effView();
     return [(clientX - r.left - v.tx) / v.z, (clientY - r.top - v.ty) / v.z];
   };
 
@@ -1649,7 +1668,19 @@ window.ATELIER_REFS = [{"id": "ws-lines-1", "title": "Straight lines — set 1",
       if (this._touchPts.size === 2) { e.preventDefault(); this._maybeStartPinch(); if (this._pinch) return; }
     }
     if (this._activeId != null) return;       // one pointer owns the surface at a time
+    // stepped back = judging distance: you can't mark from across the room —
+    // any tap walks you back to the easel instead
+    if (this.stepBack) { e.preventDefault(); this.stepBack = false; this.redraw(); if (this.onStepBack) this.onStepBack(false); return; }
     if (!this._drawing && !this._cropping) this._measure();   // refresh rect (layout may have settled)
+    if (this.stringMode) {
+      e.preventDefault();
+      this._capture(e);
+      this._activeId = e.pointerId;
+      this._stringing = true;
+      const p = this._design(e); this.stringLine = { a: p, b: p };
+      this.redraw();
+      return;
+    }
     if (this.measureMode) {
       e.preventDefault();
       this._capture(e);
@@ -1698,6 +1729,7 @@ window.ATELIER_REFS = [{"id": "ws-lines-1", "title": "Straight lines — set 1",
       if (this._pinch) { e.preventDefault(); this._doPinch(); return; }
     }
     if (this._activeId != null && e.pointerId !== this._activeId) return;
+    if (this._stringing) { e.preventDefault(); this.stringLine.b = this._design(e); this._scheduleFull(); return; }
     if (this._measuring) { e.preventDefault(); this._curMeasure.b = this._design(e); this._scheduleFull(); return; }
     if (this._cropping) { e.preventDefault(); this.cropRect[1] = this._design(e); this._scheduleFull(); return; }
     if (this._erasingActive) {
@@ -1740,6 +1772,13 @@ window.ATELIER_REFS = [{"id": "ws-lines-1", "title": "Straight lines — set 1",
     // otherwise the first tap after a stroke is swallowed and you must tap twice.
     try { if (e && e.pointerId != null && this.canvas.releasePointerCapture) this.canvas.releasePointerCapture(e.pointerId); } catch (_) {}
     this._activeId = null;
+    if (this._stringing) {
+      this._stringing = false;
+      if (this.stringLine && this._mlen({ a: this.stringLine.a, b: this.stringLine.b }) < 0.02) this.stringLine = null;   // a tap clears it
+      this.redraw();
+      if (this.onStrokeEnd) this.onStrokeEnd();
+      return;
+    }
     if (this._measuring) {
       this._measuring = false;
       const m = this._curMeasure; this._curMeasure = null;
@@ -1786,11 +1825,38 @@ window.ATELIER_REFS = [{"id": "ws-lines-1", "title": "Straight lines — set 1",
     });
   };
 
+  // effective view: step-back overrides the pinch with a centered zoom-out —
+  // the digital walk-away-from-the-easel (detail filters out, structure remains)
+  Surface.prototype._effView = function () {
+    if (!this.stepBack) return this.view;
+    const z = 0.55;
+    return { z, tx: this.cssW * (1 - z) / 2, ty: this.cssH * (1 - z) / 2 };
+  };
   Surface.prototype._setStrokeTransform = function (ctx) {
     const r = this._rect || this.canvas.getBoundingClientRect();
     const sx = this.canvas.width / (r.width || 1), sy = this.canvas.height / (r.height || 1);
-    const v = this.view;   // pinch zoom/pan composes on top of the DPR mapping
+    const v = this._effView();   // pinch zoom/pan composes on top of the DPR mapping
     ctx.setTransform(sx * v.z, 0, 0, sy * v.z, sx * v.tx, sy * v.ty);
+  };
+  Surface.prototype.toggleStepBack = function () {
+    this.stepBack = !this.stepBack;
+    this.redraw();
+    if (this.onStepBack) this.onStepBack(this.stepBack);
+    return this.stepBack;
+  };
+  // eye-flick: flash the reference over the DRAWING panel for a beat — the
+  // fast subject↔drawing comparison of sight-size, without moving the eyes
+  Surface.prototype.flick = function (ms) {
+    this._flickUntil = performance.now() + (ms || 700);
+    this.redraw();
+    setTimeout(() => this.redraw(), (ms || 700) + 30);
+  };
+  Surface.prototype.toggleString = function () {
+    this.stringMode = !this.stringMode;
+    if (this.stringMode) { this.erasing = false; this.measureMode = false; }
+    else this.stringLine = null;
+    this.redraw();
+    return this.stringMode;
   };
   Surface.prototype._segWidth = function (a, b) {
     const p = ((a[2] == null ? 0.5 : a[2]) + (b[2] == null ? 0.5 : b[2])) / 2;
@@ -1832,9 +1898,12 @@ window.ATELIER_REFS = [{"id": "ws-lines-1", "title": "Straight lines — set 1",
     this.cropMode = false; this.cropRect = null;
     this.erasing = false; this._erasingActive = false; this._erasePt = null;
     this.measureMode = false; this.measures = []; this._curMeasure = null; this._measuring = false;
+    this.sightSize = false; this.refBox = null; this.stepBack = false;
+    this.stringLine = null; this.stringMode = false; this._stringing = false; this._flickUntil = 0;
     this._undoStack = [];
     this.view = { z: 1, tx: 0, ty: 0 }; this._pinch = null;
     if (this.onViewChange) this.onViewChange(1);
+    this._measure();   // layout may switch between single-box and sight-size split
     this.redraw();
   };
   Surface.prototype.setTarget = function (t) { this.target = t; this.redraw(); };
@@ -1970,20 +2039,52 @@ window.ATELIER_REFS = [{"id": "ws-lines-1", "title": "Straight lines — set 1",
     ctx.restore();
   };
 
-  Surface.prototype._drawGhost = function (ctx, opacity) {
+  Surface.prototype._drawGhost = function (ctx, opacity, intoBox) {
     const g = this.ghost; if (!g || !g.img) return;
+    const b = intoBox || this.box;
     const im = g.img;
     const iw = im.naturalWidth || im.width, ih = im.naturalHeight || im.height;
     if (!iw || !ih) return;
-    const s = Math.min(this.box.s / iw, this.box.s / ih);
+    const s = Math.min(b.s / iw, b.s / ih);
     const w = iw * s, h = ih * s;
-    const x = this.box.x + (this.box.s - w) / 2, y = this.box.y + (this.box.s - h) / 2;
+    const x = b.x + (b.s - w) / 2, y = b.y + (b.s - h) / 2;
     ctx.save(); ctx.globalAlpha = opacity;
     if (this.ghostFlip) {     // 180° rotation defeats symbol-recognition (Edwards)
-      const cx = this.box.x + this.box.s / 2, cy = this.box.y + this.box.s / 2;
+      const cx = b.x + b.s / 2, cy = b.y + b.s / 2;
       ctx.translate(cx, cy); ctx.rotate(Math.PI); ctx.translate(-cx, -cy);
     }
     ctx.drawImage(im, x, y, w, h); ctx.restore();
+  };
+
+  // the taut string: a straight check-line laid at ANY angle, extended across
+  // BOTH panels — compare an alignment or slope on the plate against the same
+  // place in the drawing, exactly like a string stretched between the hands.
+  // Held horizontal it is the classical level line.
+  Surface.prototype._drawString = function (ctx) {
+    const s = this.stringLine; if (!s) return;
+    const a = this.toPx(s.a), b = this.toPx(s.b);
+    const dx = b[0] - a[0], dy = b[1] - a[1];
+    const L = Math.hypot(dx, dy); if (L < 2) return;
+    const ux = dx / L, uy = dy / L;
+    const ext = (this.cssW + this.cssH) * 2;
+    ctx.save();
+    ctx.strokeStyle = 'rgba(42,107,138,0.85)'; ctx.lineWidth = 1.5; ctx.setLineDash([9, 6]);
+    ctx.beginPath();
+    ctx.moveTo(a[0] - ux * ext, a[1] - uy * ext);
+    ctx.lineTo(a[0] + ux * ext, a[1] + uy * ext);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    // angle readout (from horizontal, folded to ±90°)
+    let deg = Math.atan2(dy, dx) * 180 / Math.PI;
+    if (deg > 90) deg -= 180; if (deg <= -90) deg += 180;
+    const lab = Math.abs(deg) < 0.75 ? 'level' : deg.toFixed(1) + '°';
+    const mx = (a[0] + b[0]) / 2, my = (a[1] + b[1]) / 2 - 12;
+    ctx.font = '600 12px ui-sans-serif, system-ui, -apple-system, sans-serif';
+    const tw = ctx.measureText(lab).width + 8;
+    ctx.fillStyle = 'rgba(255,255,255,0.9)'; ctx.fillRect(mx - tw / 2, my - 9, tw, 17);
+    ctx.fillStyle = 'rgba(42,107,138,1)'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillText(lab, mx, my);
+    ctx.restore();
   };
 
   // plumb line, horizon, rule-of-thirds and a faint angle-clock ring — the
@@ -2046,6 +2147,12 @@ window.ATELIER_REFS = [{"id": "ws-lines-1", "title": "Straight lines — set 1",
   Surface.prototype.redraw = function () {
     const ctx = this.ctx;
     ctx.save();
+    // raw clear first: when stepped back (zoomed out) the paper floats on a
+    // desk-toned surround, so the whole viewport must be painted
+    const r0 = this._rect || this.canvas.getBoundingClientRect();
+    ctx.setTransform(this.canvas.width / (r0.width || 1), 0, 0, this.canvas.height / (r0.height || 1), 0, 0);
+    ctx.fillStyle = this.stepBack ? '#dcd6c9' : '#ffffff';
+    ctx.fillRect(0, 0, this.cssW, this.cssH);
     // transform from the live displayed size (not an assumed dpr) so 1 unit = 1 CSS px
     this._setStrokeTransform(ctx);
     ctx.fillStyle = '#ffffff';
@@ -2057,11 +2164,22 @@ window.ATELIER_REFS = [{"id": "ws-lines-1", "title": "Straight lines — set 1",
     ctx.strokeRect(this.box.x, this.box.y, this.box.s, this.box.s);
     ctx.restore();
 
+    // sight-size: the reference panel, always fully visible, same scale
+    if (this.sightSize && this.refBox) {
+      ctx.save();
+      ctx.strokeStyle = 'rgba(0,0,0,0.1)'; ctx.lineWidth = 1;
+      ctx.strokeRect(this.refBox.x, this.refBox.y, this.refBox.s, this.refBox.s);
+      ctx.restore();
+      if (this.ghost) this._drawGhost(ctx, 1, this.refBox);
+      // eye-flick: the reference flashed over the DRAWING panel for a beat
+      if (this._flickUntil > performance.now() && this.ghost) this._drawGhost(ctx, 0.45, this.box);
+    }
+
     // sighting training wheels
     if (this.guides) this._drawGuides(ctx);
 
-    // reference ghost (study or self-check)
-    if (this.ghost) this._drawGhost(ctx, this.ghostStudy ? 1 : this.ghost.opacity);
+    // reference ghost (study or self-check) — sight-size draws it in its own panel above
+    if (this.ghost && !this.sightSize) this._drawGhost(ctx, this.ghostStudy ? 1 : this.ghost.opacity);
 
     // terminator drill: the form itself is always visible (shaded during study)
     if (this.target && this.target.kind === 'shade') {
@@ -2087,6 +2205,8 @@ window.ATELIER_REFS = [{"id": "ws-lines-1", "title": "Straight lines — set 1",
     }
     // comparative-measurement calipers (above marks, below crop UI)
     if (this.measures.length || this._curMeasure) this._drawMeasures(ctx);
+    // the taut-string check line (spans both panels)
+    if (this.stringLine) this._drawString(ctx);
     // crop selection rectangle
     if (this.cropRect) {
       const a = this.toPx(this.cropRect[0]), b = this.toPx(this.cropRect[1]);
@@ -2148,6 +2268,9 @@ window.ATELIER_REFS = [{"id": "ws-lines-1", "title": "Straight lines — set 1",
     { key: 'shade', name: 'Terminator (Light & Shadow)', module: 4, scored: true,
       blurb: 'Study a lit form, then draw the shadow line — where light turns to dark — from memory, on the bare form.',
       study: (l) => clamp(Math.round(14 - l), 3, 14), draw: 25, maxLevel: 9 },
+    { key: 'sightsize', name: 'Sight-Size Copy', module: 4, scored: false, refCat: 'any',
+      blurb: 'The atelier method: copy the plate at the same size, side by side — pure eye comparison, then an exact score.',
+      study: () => 0, draw: null, maxLevel: 1 },
     { key: 'contour', name: 'Contour (Edges)', module: 4, scored: false, refCat: 'any',
       blurb: 'Trace one edge slowly from memory — eyes on the form, building edge-perception.',
       study: () => 40, draw: null, maxLevel: 1 },
@@ -2391,6 +2514,15 @@ window.ATELIER_REFS = [{"id": "ws-lines-1", "title": "Straight lines — set 1",
         if (m.iou != null && m.iou < 0.6) return 'Follow the bend more closely — pin the start, end and apex (furthest bow) first.';
         return 'Nice curve — smooth and close to the path.';
       }
+      if (exKey === 'sightsize') {
+        const parts = [];
+        if (m.dy != null && Math.abs(m.dy) >= 4) parts.push(`sits ${Math.abs(m.dy)}% too ${m.dy > 0 ? 'low' : 'high'}`);
+        if (m.dx != null && Math.abs(m.dx) >= 4) parts.push(`${Math.abs(m.dx)}% too far ${m.dx > 0 ? 'right' : 'left'}`);
+        if (m.sizeErrPct != null && Math.abs(m.sizeErrPct) >= 5) parts.push(`${Math.abs(m.sizeErrPct)}% too ${m.sizeErrPct > 0 ? 'large' : 'small'}`);
+        if (parts.length) return 'Your copy ' + parts.join(', ') + ' — sight-size wants it exactly in place.';
+        if (m.iou != null && m.iou < 0.7) return 'Placement and size read true — now truer contours: flick plate \u2194 drawing more often.';
+        return 'A faithful copy — placement, size and contour all read true.';
+      }
       if (exKey === 'shade') {
         if (m.iou != null && m.iou < 0.7) return 'Find where the form turns from the light — place the boundary first, then follow its bow.';
         return 'Well placed — you saw where the form turns away from the light.';
@@ -2446,6 +2578,9 @@ window.ATELIER_REFS = [{"id": "ws-lines-1", "title": "Straight lines — set 1",
       apex: { icon: '⌒', title: 'Pin the anchors, then the bow',
         why: 'A curve is fully described by its two endpoints and its apex — the furthest point it departs from the straight line between them. Fix those three and the curve almost draws itself.',
         how: 'Before the sweep, mark start, end, and where (and how far) it bows out. Draw through those points in one unhurried stroke rather than feeling your way along the edge.' },
+      sight: { icon: '⇄', title: 'Trust the flick, not the stare',
+        why: 'Sight-size works because the eye is superb at spotting a DIFFERENCE between two same-sized images and poor at measuring absolutes. Staring at your drawing alone tells you nothing; the information lives in the rapid comparison.',
+        how: 'Work in the rhythm: mark \u2192 flick eyes to the plate \u2192 correct. Step back before any big decision — at judging distance only the true errors survive. Lay the string across both panels when an angle or alignment is in doubt.' },
       terminator: { icon: '◑', title: 'The terminator follows the form',
         why: 'The shadow line isn’t an outline you copy — it’s where the surface turns away from the light. Its position is set by the light direction; its curve is set by the form. Misplacing it flattens the volume instantly.',
         how: 'First ask: where does the light come from? The terminator sits roughly a quarter-turn around from it. Then let its bow follow the form’s roundness — straighter on a cylinder, fuller on a sphere. Place, then curve.' },
@@ -2471,6 +2606,8 @@ window.ATELIER_REFS = [{"id": "ws-lines-1", "title": "Straight lines — set 1",
         if (m.iou != null && m.iou < 0.75) return coach.PRINCIPLES.apex;
       } else if (exKey === 'gesture') {
         if (m.iou != null && m.iou < 0.8) return coach.PRINCIPLES.loa;
+      } else if (exKey === 'sightsize') {
+        if (r && r.score != null && r.score < 85) return coach.PRINCIPLES.sight;
       } else if (exKey === 'shade') {
         if (m.iou != null && m.iou < 0.8) return coach.PRINCIPLES.terminator;
       } else {   // polygon / envelope
@@ -2830,8 +2967,28 @@ window.ATELIER_REFS = [{"id": "ws-lines-1", "title": "Straight lines — set 1",
     this.isRecall = false;      // retention check on a previously-studied target
     this._timer = null;
     this.onState = null; this.onTick = null; this.onResult = null;
-    surface.onStrokeEnd = () => { if (this.onState) this.onState(this); };
+    surface.onStrokeEnd = () => {
+      // sight-size rhythm: count marks since the last step-back for the nudge
+      // (laying the string is a check, not a mark — don't count it)
+      if (this.exKey === 'sightsize' && this.phase === 'draw' && !surface.stringMode)
+        this.marksSinceStepBack = (this.marksSinceStepBack || 0) + 1;
+      if (this.onState) this.onState(this);
+    };
   }
+
+  // sight-size: after seeing the score, keep refining the SAME copy — the
+  // mark → compare → correct loop is the method itself
+  Drill.prototype.refineSightSize = function () {
+    if (this.exKey !== 'sightsize') return;
+    this.result = null; this.pending = null;
+    this.phase = 'draw';
+    this.surface.locked = false;
+    this.surface.setPhase('draw');
+    this.marksSinceStepBack = 0;
+    this.drawStart = performance.now();
+    this._startDrawTimer();
+    this._emit();
+  };
 
   Drill.prototype._emit = function () { if (this.onState) this.onState(this); };
 
@@ -2854,8 +3011,31 @@ window.ATELIER_REFS = [{"id": "ws-lines-1", "title": "Straight lines — set 1",
     }).catch(() => {});
     this.ref = refItem || null;
     this.surface.reset();
+    // sight-size has no study/hide: the reference stays beside the drawing the
+    // whole time — the discipline is comparison, not memory
+    if (exKey === 'sightsize') { this._enterSightSize(); return; }
     this._newTargetGeom();
     this._enterStudy();
+  };
+
+  Drill.prototype._enterSightSize = function () {
+    this.phase = 'draw';
+    this.target = null;
+    this.surface.sightSize = true;
+    this.surface.resize();                       // relayout into the split panels
+    this.surface.locked = false;
+    this.surface.guides = false;
+    this.surface.setTarget(null);
+    this.surface.setGhost(this.ref ? this.ref.img : null, 1);
+    this.surface.setPhase('draw');
+    this.studySec = 0; this.studyElapsed = 0; this.glanceCount = 0; this.glanceCap = 0;
+    this.stages = null; this.stage = 0;
+    this.drawBudget = null;                      // sight-size is deliberately unhurried
+    this.drawElapsed = 0;
+    this.drawStart = performance.now();
+    this.marksSinceStepBack = 0;                 // feeds the step-back rhythm nudge
+    this._startDrawTimer();
+    this._emit();
   };
 
   Drill.prototype._newTargetGeom = function () {
@@ -3031,6 +3211,7 @@ window.ATELIER_REFS = [{"id": "ws-lines-1", "title": "Straight lines — set 1",
     if (this.surface.isEmpty()) return false;
     if (this.exKey === 'line' || this.exKey === 'curve' || this.exKey === 'gesture' || this.exKey === 'shade') return this.surface.totalPoints() >= 2;
     if (this.exKey === 'polygon' || this.exKey === 'envelope') return this.surface.totalPoints() >= 3;
+    if (this.exKey === 'sightsize') return this.surface.totalPoints() >= 4;
     return true;
   };
 
@@ -3046,6 +3227,17 @@ window.ATELIER_REFS = [{"id": "ws-lines-1", "title": "Straight lines — set 1",
     this.drawSec = (performance.now() - this.drawStart) / 1000;
     const strokes = this.surface.strokesDesign();
 
+    // sight-size: objective (position-sensitive) score, but still through the
+    // estimate-before-reveal step — judging your own copy first is the skill
+    if (this.exKey === 'sightsize' && this.ref && this.ref.img) {
+      const r = A.imgScore.sightScore(this.ref.img, this.surface.strokesDesign());
+      this.pending = r;
+      this.sessionIndex++;
+      this.phase = 'estimate';
+      this.surface.locked = true;
+      this._emit();
+      return;
+    }
     if (this.def.scored) {
       let r;
       if (this.exKey === 'line') {
@@ -4179,8 +4371,51 @@ window.ATELIER_REFS = [{"id": "ws-lines-1", "title": "Straight lines — set 1",
     return { score, iou: +(score / 100).toFixed(3), method: 'edge' };
   }
 
+  // boundary pixels of a mask (works for filled photos AND line-art alike:
+  // a line's pixels are all boundary; a silhouette reduces to its outline)
+  function edgePoints(mask, cap) {
+    const pts = [];
+    for (let y = 0; y < G; y++) for (let x = 0; x < G; x++) {
+      const i = y * G + x;
+      if (!mask[i]) continue;
+      if (x === 0 || y === 0 || x === G - 1 || y === G - 1 ||
+          !mask[i - 1] || !mask[i + 1] || !mask[i - G] || !mask[i + G]) pts.push([x / G, y / G]);
+    }
+    if (cap && pts.length > cap) { const step = Math.ceil(pts.length / cap); return pts.filter((_, i) => i % step === 0); }
+    return pts;
+  }
+
   const imgScore = {
     autoThreshold,
+
+    /* ---- sight-size scoring ------------------------------------------------
+       The reference panel and the drawing panel share one coordinate system at
+       1:1, so unlike the memory drills NOTHING is normalised away: the drawing
+       is compared to the reference IN PLACE. Placement, size and proportion
+       errors all count — exactly what the sight-size method disciplines.
+       Also reports the actionable errors a teacher would name: where the copy
+       sits (dx/dy) and how its size compares (sizeErrPct).                   */
+    sightScore(img, strokesDesign) {
+      if (!img || !strokesDesign || !strokesDesign.length) return { score: 0, iou: 0, metrics: {} };
+      const auto = autoThreshold(img, null);
+      const mask = maskFromImage(img, auto.threshold, auto.invert, null);
+      const E = edgePoints(mask, 600);
+      let U = [];
+      for (const s of strokesDesign) for (const p of s) U.push([p[0], p[1]]);
+      if (U.length > 500) { const step = Math.ceil(U.length / 500); U = U.filter((_, i) => i % step === 0); }
+      if (E.length < 8 || U.length < 4) return { score: 0, iou: 0, metrics: {} };
+      const mn = (A2, B2) => { let s = 0; for (const p of A2) { let m = 1e9; for (const q of B2) { const dx = p[0] - q[0], dy = p[1] - q[1], dd = dx * dx + dy * dy; if (dd < m) m = dd; } s += Math.sqrt(m); } return s / A2.length; };
+      const ch = 0.6 * mn(U, E) + 0.4 * mn(E, U);
+      const score = Math.round(Math.max(0, Math.min(100, 100 - ch * 480)));
+      // placement + size read directly off the two bounding boxes
+      const bbOf = (pts) => { let a = 1e9, b = 1e9, c = -1e9, d = -1e9; for (const p of pts) { if (p[0] < a) a = p[0]; if (p[0] > c) c = p[0]; if (p[1] < b) b = p[1]; if (p[1] > d) d = p[1]; } return { cx: (a + c) / 2, cy: (b + d) / 2, diag: Math.hypot(c - a, d - b) }; };
+      const be = bbOf(E), bu = bbOf(U);
+      const dx = +((bu.cx - be.cx) * 100).toFixed(1);        // % of panel; + = right
+      const dy = +((bu.cy - be.cy) * 100).toFixed(1);        // + = low
+      const sizeErrPct = be.diag ? +(((bu.diag / be.diag) - 1) * 100).toFixed(1) : 0;
+      return { score, iou: +(score / 100).toFixed(3),
+               metrics: { iou: +(score / 100).toFixed(3), dx, dy, sizeErrPct } };
+    },
     // returns {iou, score, coverage, method}. Auto-selects: a filled subject is
     // scored by silhouette overlap; a line-art plate by edge/contour matching.
     score(img, strokesDesign, threshold, invert, region) {
@@ -4588,8 +4823,11 @@ window.ATELIER_REFS = [{"id": "ws-lines-1", "title": "Straight lines — set 1",
     const groups = A.curr.modules.map((m) => {
       const exs = A.curr.EXERCISES.filter((e) => e.module === m.n);
       const rows = exs.map((e) => {
-        const lvl = e.scored ? `Lv ${A.curr.level(e.key)} · ${A.curr.studySeconds(e.key)}s study` : `${e.study()}s study`;
-        const tag = e.scored ? '<span class="tag">scored</span>' : '<span class="tag self">self-check</span>';
+        // sight-size is a reference drill but objectively scored, and has no study
+        // timer — the plate stays in view the whole time
+        const lvl = e.scored ? `Lv ${A.curr.level(e.key)} · ${A.curr.studySeconds(e.key)}s study`
+          : e.key === 'sightsize' ? 'unhurried · exact score' : `${e.study()}s study`;
+        const tag = (e.scored || e.key === 'sightsize') ? '<span class="tag">scored</span>' : '<span class="tag self">self-check</span>';
         return `<div class="exrow" data-ex="${e.key}">
           <div class="meta"><div class="nm">${esc(e.name)} ${tag}</div>
             <div class="small muted">${esc(e.blurb)}</div>
@@ -4713,6 +4951,9 @@ window.ATELIER_REFS = [{"id": "ws-lines-1", "title": "Straight lines — set 1",
     const zr = $('#d-zoomreset', d);
     surface.onViewChange = (z) => { zr.style.display = z > 1.02 ? 'block' : 'none'; };
     zr.addEventListener('pointerup', (e) => { e.preventDefault(); surface.resetView(); });
+    // sight-size: any step-back transition (button or tap-to-return) restarts the
+    // mark-count behind the rhythm nudge and re-renders the controls
+    surface.onStepBack = () => { if (drill && drill.exKey === 'sightsize') drill.marksSinceStepBack = 0; updateDrill(); };
     drill = new A.Drill(surface);
     drill.onState = updateDrill;
     drill.onTick = updateTimer;
@@ -4727,6 +4968,7 @@ window.ATELIER_REFS = [{"id": "ws-lines-1", "title": "Straight lines — set 1",
     polygon: 'Fix each corner’s position relative to the others. Block the whole shape in, then check its proportion before committing.',
     envelope: 'Find the outer “envelope” first — the largest straight lines that contain the form — then facet into smaller straights and round to the true contour, noticing where the edge turns sharply versus flows. General to specific.',
     gesture: 'A figure is shown as its line of action — one flowing line through the whole pose, with the head and main masses. Memorise that line, then draw it from memory in a single sweep. It’s the rhythm you’re after, not the outline; push the curve a little.',
+    sightsize: 'The classical atelier setup: the plate sits beside your paper at the same size, and you copy it using pure eye comparison — mark, flick your eyes to the plate, correct. Step back often to judge the whole; lay the String across both panels to check an angle or alignment. Scoring is exact: placement, size and contour all count, and you can keep refining the same copy.',
     contour: 'Trace one continuous edge slowly with your eyes, then draw it from memory in a single, unhurried line. It’s about seeing the edge, not speed.',
     negative: 'Ignore the object itself — memorise only the empty shapes around and between the forms, then draw those negative shapes.',
     bargue: 'Study only the straight-line block-in stage. Draw the outer envelope from memory, then fade the plate back over your drawing to see where you drifted.',
@@ -4735,9 +4977,14 @@ window.ATELIER_REFS = [{"id": "ws-lines-1", "title": "Straight lines — set 1",
   };
   function showHowTo(exKey) {
     const def = A.curr.def(exKey);
+    // sight-size is the one drill where looking IS the method — its rhythm line
+    // is comparison, not the study-hide-recall loop
+    const rhythm = exKey === 'sightsize'
+      ? 'The rhythm here: <b>mark → flick eyes to the plate → correct</b>, and step back before every big decision. Unlike the memory drills, constant comparison is the whole point.'
+      : 'The rhythm is always: <b>study → hide → draw from memory → reveal → correct & redraw</b>. Never peek while drawing — the struggle is where the learning happens.';
     openModal(`<h2>${esc(def ? def.name : exKey)}</h2>
       <p class="small" style="margin:8px 0">${esc(HOWTO[exKey] || '')}</p>
-      <div class="insight" style="text-align:left">The rhythm is always: <b>study → hide → draw from memory → reveal → correct & redraw</b>. Never peek while drawing — the struggle is where the learning happens.</div>
+      <div class="insight" style="text-align:left">${rhythm}</div>
       <p class="small muted" style="margin:8px 0 0"><b>The ring</b> tracks your time: while studying it fills to the suggested look length, while drawing it fills to a recall budget. It turns <span style="color:var(--warn);font-weight:600">amber</span> and pulses when you reach it — a gentle cue to move on (hide &amp; draw, or commit your marks). It’s never a hard stop; take the time you need.</p>
       <button class="btn block" data-done="1" style="margin-top:12px">Got it</button>`)
       .addEventListener('click', (e) => { if (e.target.closest('[data-done]')) closeModal(); });
@@ -5050,7 +5297,27 @@ window.ATELIER_REFS = [{"id": "ws-lines-1", "title": "Straight lines — set 1",
       const undoBtn = `<button class="btn ghost sm" data-act="undo" ${surface.canUndo() ? '' : 'disabled'}>Undo</button>`;
       const eraseBtn = `<button class="btn ghost sm ${surface.erasing ? 'sel' : ''}" data-act="erase">Erase</button>`;
       const guidesBtn = `<button class="btn ghost sm ${surface.guides ? 'sel' : ''}" data-act="guides">Guides</button>`;
-      if (!def.scored && drill.stages) {     // guided multi-stage block-in
+      if (drill.exKey === 'sightsize') {     // side-by-side copy: compare, don't memorise
+        const scoreBtn = `<button class="btn" data-act="evaluate" ${drill.canEvaluate() ? '' : 'disabled'}>Score ›</button>`;
+        if (surface.stepBack) {
+          instr.textContent = 'Judging distance — placement and size errors show themselves. Tap the canvas to walk back in.';
+          controls.innerHTML = `<button class="btn ghost sm sel" data-act="stepback">Step back</button>${scoreBtn}`;
+        } else {
+          // step-back rhythm nudge: after a run of marks without judging the whole,
+          // steer the eye back — that IS the sight-size discipline
+          const needStep = (drill.marksSinceStepBack || 0) >= 12;
+          instr.textContent = needStep
+            ? 'Step back — judge the whole before the next mark.'
+            : (surface.stringMode
+              ? 'Drag the string across both panels — same angle on the plate and your copy?'
+              : 'Copy the plate at the same size. Rhythm: mark → flick eyes to the plate → correct.');
+          const stringBtn = `<button class="btn ghost sm ${surface.stringMode ? 'sel' : ''}" data-act="string">String</button>`;
+          controls.innerHTML = `<button class="btn ghost sm" data-act="stepback">Step back</button>
+            <button class="btn ghost sm" data-act="flick">Flick</button>${stringBtn}${measureBtns}${undoBtn}${eraseBtn}
+            <button class="btn ghost sm" data-act="clear">Clear</button>${scoreBtn}`;
+        }
+      }
+      else if (!def.scored && drill.stages) {     // guided multi-stage block-in
         const last = drill.stage >= drill.stages.length - 1;
         instr.textContent = `Stage ${drill.stage + 1}/${drill.stages.length} — ${drill.stages[drill.stage]}` + measuring;
         controls.innerHTML = `${glanceBtn}${measureBtns}${guidesBtn}${flipBtn}${undoBtn}${eraseBtn}<button class="btn ghost sm" data-act="clear">Clear</button>
@@ -5078,7 +5345,9 @@ window.ATELIER_REFS = [{"id": "ws-lines-1", "title": "Straight lines — set 1",
       controls.innerHTML = '';
     }
     else if (drill.phase === 'reveal') {
-      if (def.scored && drill.result) revealScored(instr, controls, result);
+      // sight-size is objectively scored (placement + size + contour) even though
+      // it's a reference drill — it gets the full scored reveal, not self-rating
+      if ((def.scored || drill.exKey === 'sightsize') && drill.result) revealScored(instr, controls, result);
       else revealReference(instr, controls, result);
     }
     bindControls(controls, result);
@@ -5087,7 +5356,9 @@ window.ATELIER_REFS = [{"id": "ws-lines-1", "title": "Straight lines — set 1",
 
   function revealScored(instr, controls, result) {
     const r = drill.result;
-    instr.textContent = 'Compare: your marks vs the target (red).';
+    instr.textContent = drill.exKey === 'sightsize'
+      ? 'Scored in place — placement, size and contour all count. Refine the same copy to close the gaps.'
+      : 'Compare: your marks vs the target (red).';
     const m = r.metrics || {};
     // repeats saw the answer; recalls are a different game — neither sets a PB
     if (!r._pb && !r.repeat && !r.recall) r._pb = A.game.personalBest(drill.exKey, r.score);
@@ -5123,6 +5394,13 @@ window.ATELIER_REFS = [{"id": "ws-lines-1", "title": "Straight lines — set 1",
         <div class="metricline"><span>Length error</span><b>${le > 0 ? '+' : ''}${le}% ${le > 0 ? '(long)' : le < 0 ? '(short)' : ''}</b></div>`;
     } else if (drill.exKey === 'curve' || drill.exKey === 'gesture') {
       metricRows = `<div class="metricline"><span>${drill.exKey === 'gesture' ? 'Line-of-action match' : 'Curve match'}</span><b>${Math.round((m.iou || 0) * 100)}%</b></div>`;
+    } else if (drill.exKey === 'sightsize') {
+      // signed placement/size readouts — the exact corrections sight-size trains
+      const off = (v, pos, neg) => v > 0 ? `${v}% ${pos}` : v < 0 ? `${-v}% ${neg}` : 'spot on';
+      metricRows = `<div class="metricline"><span>Contour match</span><b>${Math.round((m.iou || 0) * 100)}%</b></div>
+        <div class="metricline"><span>Placement ↔</span><b>${off(m.dx || 0, 'right', 'left')}</b></div>
+        <div class="metricline"><span>Placement ↕</span><b>${off(m.dy || 0, 'low', 'high')}</b></div>
+        <div class="metricline"><span>Size</span><b>${off(m.sizeErrPct || 0, 'large', 'small')}</b></div>`;
     } else {
       metricRows = `<div class="metricline"><span>Shape match</span><b>${Math.round((m.iou || 0) * 100)}%</b></div>
         <div class="metricline"><span>Proportion error</span><b>${m.aspectErrPct > 0 ? '+' : ''}${m.aspectErrPct}% ${m.aspectErrPct > 0 ? '(wide)' : m.aspectErrPct < 0 ? '(tall)' : ''}</b></div>`;
@@ -5168,7 +5446,10 @@ window.ATELIER_REFS = [{"id": "ws-lines-1", "title": "Straight lines — set 1",
           <div class="lc-how"><b>How:</b> ${esc(pr.how)}</div></div>`;
       };
     }
-    controls.innerHTML = drill.isRecall
+    controls.innerHTML = drill.exKey === 'sightsize'
+      ? `<button class="btn ghost sm" data-act="close">Done ›</button>
+         <button class="btn" data-act="refine">Refine the copy ›</button>`
+      : drill.isRecall
       ? `<button class="btn ghost sm" data-act="again">Study it again</button>
          <button class="btn" data-act="close" id="d-recnext">Done ›</button>`
       : `<button class="btn ghost sm" data-act="redraw">Redraw</button>
@@ -5317,6 +5598,10 @@ window.ATELIER_REFS = [{"id": "ws-lines-1", "title": "Straight lines — set 1",
       else if (a === 'guides') { drill.toggleGuides(); updateDrill(); }
       else if (a === 'measure') { surface.toggleMeasure(); updateDrill(); }
       else if (a === 'clearmeasure') { surface.clearMeasures(); updateDrill(); }
+      else if (a === 'stepback') surface.toggleStepBack();   // onStepBack refreshes the UI
+      else if (a === 'flick') surface.flick();
+      else if (a === 'string') { surface.toggleString(); updateDrill(); }
+      else if (a === 'refine') drill.refineSightSize();
       else if (a === 'nextstage') drill.nextStage();
       else if (a === 'evaluate') drill.evaluate();
       else if (a === 'redraw') drill.correctAndRedraw();
@@ -5899,8 +6184,8 @@ window.ATELIER_REFS = [{"id": "ws-lines-1", "title": "Straight lines — set 1",
   'use strict';
   // Stamped by build/build.js: A.VERSION from build/version.json, A.BUILD from
   // the build clock (YYMMDD.HHMM). These literals are only the un-built dev fallback.
-  A.VERSION = '1.7.0';
-  A.BUILD = '260706.0631';
+  A.VERSION = '1.8.0';
+  A.BUILD = '260706.0706';
   function boot() {
     try { A.ui.init(); }
     catch (e) {

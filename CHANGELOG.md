@@ -19,6 +19,19 @@ No feature reaches `main` without a version bump.
 
 ---
 
+## 1.8.0 — Sight-size practice
+
+**New mode: Sight-Size Copy (Module 4)** — the classical atelier method as a first-class drill. The plate and your paper sit side by side at the same size, and you copy by pure eye comparison — no hiding, no memory clock; the discipline is the comparison itself.
+
+- **Split 1:1 panels** — reference left, drawing right, identical size (the geometric heart of sight-size: same-size images make differences directly visible).
+- **Flick** — flashes the plate over your drawing for a beat: the rapid subject↔drawing comparison, without moving your eyes.
+- **Step back** — zooms both panels out onto a desk-tone surround, the digital walk-back-from-the-easel. Drawing is disabled at judging distance; a tap walks you back in. A rhythm nudge appears after a long run of marks without stepping back.
+- **The string (optional)** — drag a free-angle line that extends across both panels with a live angle readout ("level" near 0°), the taut-string length-and-angle check between two stretched arms.
+- **Exact, position-sensitive scoring** — unlike the memory drills, sight-size demands the copy be *in place*: a new scorer compares edge clouds without normalising position or scale, and reports **signed placement (↔/↕) and size errors** ("9.5% too high, 10% too far left, 34% too small") alongside contour match. Coaching and a new "Trust the flick, not the stare" principle card teach the mark → flick → correct rhythm.
+- **Refine loop** — after the score, keep refining the *same* copy and re-score: mark → compare → correct, the method itself.
+
+Also: laying the string or stepping back never counts as a drawn mark; the practice menu labels sight-size "scored" (it is — objectively), and the in-drill help explains the comparison rhythm instead of the study-hide-recall loop.
+
 ## 1.7.0 — Value module, perception suite, zoom & pan
 
 **New training content**
