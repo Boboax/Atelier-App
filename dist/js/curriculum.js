@@ -174,14 +174,9 @@
   };
 
   /* ---- habit / streak ----------------------------------------------------*/
-  function today() {
-    const d = new Date();
-    return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
-  }
-  function dayOffset(off) {
-    const d = new Date(); d.setDate(d.getDate() + off);
-    return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
-  }
+  // the 4 AM-rollover practice day — single source of truth in A.util (storage.js)
+  function today() { return A.util.dayKey(); }
+  function dayOffset(off) { return A.util.dayKey(off); }
 
   const habit = {
     today,

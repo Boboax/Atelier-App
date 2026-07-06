@@ -10,10 +10,8 @@
 (function (A) {
   'use strict';
 
-  function dayKey() {
-    const d = new Date();
-    return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
-  }
+  // the 4 AM-rollover practice day — single source of truth in A.util (storage.js)
+  function dayKey() { return A.util.dayKey(); }
   const lineLen = (s) => A.geom.dist(s[0], s[s.length - 1]);
 
   // guided block-in stages for reference drills (general → specific)

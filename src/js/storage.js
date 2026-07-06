@@ -15,6 +15,23 @@
   const DB_VERSION = 1;
   let _db = null;
 
+  /* ---- the practice day -----------------------------------------------------
+     The day ends at 04:00, not midnight: a session in bed just after midnight
+     belongs to the evening's sitting. Every rule that says "day" really means
+     "sittings separated by sleep" — the promotion gate's two-distinct-days
+     requirement, the retention check (recall across a night), the daily plan
+     and the streak — so the clock is shifted back 4 h before taking the date.
+     This is the ONE place a day key is computed; all modules use it. */
+  const DAY_ROLLOVER_H = 4;
+  A.util = {
+    dayKey(off, now) {                       // off: +/- days; now: injectable for tests
+      const d = now ? new Date(now.getTime()) : new Date();
+      d.setHours(d.getHours() - DAY_ROLLOVER_H);
+      if (off) d.setDate(d.getDate() + off);
+      return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+    }
+  };
+
   /* ---- profiles (several users sharing one iPad) -------------------------
      The first profile is 'default' and keeps the ORIGINAL un-namespaced keys
      and the existing (un-tagged) attempts — so nothing migrates. New profiles

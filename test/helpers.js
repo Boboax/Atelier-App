@@ -33,8 +33,10 @@ function freshEnv(files) {
 const LOGIC = ['js/geometry.js', 'js/storage.js', 'js/generators.js',
                'js/curriculum.js', 'js/coach.js', 'js/gamify.js', 'js/stats.js'];
 
+// mirrors A.util.dayKey (storage.js): the practice day rolls over at 04:00,
+// not midnight — keep in sync or time-of-day-dependent tests flake at night
 const dayKey = (offset) => {
-  const d = new Date(); d.setDate(d.getDate() + (offset || 0));
+  const d = new Date(); d.setHours(d.getHours() - 4); d.setDate(d.getDate() + (offset || 0));
   return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
 };
 

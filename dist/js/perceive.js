@@ -10,10 +10,8 @@
    ========================================================================== */
 (function (A) {
   'use strict';
-  function dayKey() {
-    const d = new Date();
-    return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
-  }
+  // the 4 AM-rollover practice day — single source of truth in A.util (storage.js)
+  function dayKey() { return A.util.dayKey(); }
   const rnd = (a, b) => a + Math.random() * (b - a);
 
   // --- progression (self-contained; mirrors the main curriculum's adaptive rule) ---
