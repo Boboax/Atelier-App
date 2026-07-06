@@ -46,7 +46,7 @@ test('staircase converges toward a threshold under a simulated observer', () => 
 test('perceive exposes all warm-up kinds', () => {
   const P = load().Perceive;
   assert.deepEqual(P.kinds, ['angle', 'prop', 'curve', 'value']);
-  assert.deepEqual(P.afcKinds, ['angle', 'length']);
+  assert.deepEqual(P.afcKinds, ['angle', 'length', 'curve', 'value']);
 });
 
 test('gamify: all perception attempt types count toward the warm-up segment', () => {
@@ -64,6 +64,8 @@ test('ladder is curriculum-derived: gesture and shade count toward mastery', () 
   const { A } = freshEnv(LOGIC);
   const base = A.game.masteryPoints();
   // level up gesture and shade via the curriculum — mastery must move
+  A.curr.noteRecall('gesture', 80, '2026-01-02');   // recallable drills need a passed cold recall to certify
+  A.curr.noteRecall('shade', 80, '2026-01-02');
   for (const d of ['2026-01-01', '2026-01-01', '2026-01-02', '2026-01-02', '2026-01-03']) A.curr.recordScore('gesture', 95, d);
   for (const d of ['2026-01-01', '2026-01-01', '2026-01-02', '2026-01-02', '2026-01-03']) A.curr.recordScore('shade', 95, d);
   assert.equal(A.game.masteryPoints(), base + 2, 'both new drills feed mastery points');

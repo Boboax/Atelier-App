@@ -271,8 +271,10 @@
      Ends after 16 taps; the threshold (mean of the last reversals) is the
      score that should shrink over weeks.                                     */
   const AFC = {
-    angle:  { start: 14, min: 1,  max: 30, unit: '°',  ask: 'Which line is steeper?' },
-    length: { start: 18, min: 2,  max: 40, unit: '%',  ask: 'Which line is longer?' }
+    angle:  { start: 14, min: 1,   max: 30, unit: '°', factor: 6, ask: 'Which line is steeper?' },
+    length: { start: 18, min: 2,   max: 40, unit: '%', factor: 4, ask: 'Which line is longer?' },
+    curve:  { start: 10, min: 0.8, max: 22, unit: '%', factor: 5, ask: 'Which curve bows more?' },
+    value:  { start: 16, min: 1.5, max: 34, unit: '',  factor: 3, ask: 'Which is darker?' }
   };
   // pure staircase step (exported for tests): 2 consecutive correct → harder
   // (smaller diff); any miss → easier. Reversals mark the oscillation points.
@@ -289,11 +291,18 @@
     return out;
   }
 
-  const AFC_TAPS = 16;
+  // a reliable staircase threshold needs ~6-8 reversals (Levitt 1971) — the old
+  // 16-tap / 4-reversal run measured mostly luck, so week-over-week progress
+  // drowned in test-retest noise. Now: warm-start near your last threshold
+  // (converges in a few trials), run to 8 reversals (or a 30-trial cap),
+  // average the last 6 reversals.
+  const AFC_TAPS = 30, AFC_REVS = 8;
   function startAFC(kind) {
     build(); el.classList.add('on');
     const cfg = AFC[kind] || AFC.angle;
-    st = { afc: kind, cfg, diff: cfg.start, streak: 0, lastDir: null,
+    const last = A.store.get('afcLast', {})[kind];
+    const startD = last ? Math.max(cfg.min, Math.min(cfg.max, last * 1.5)) : cfg.start;
+    st = { afc: kind, cfg, diff: startD, streak: 0, lastDir: null,
            reversals: [], taps: 0, hits: 0, t0: performance.now(), timer: null };
     setRing(0, false, 'discriminate');
     afcRound();
@@ -301,7 +310,7 @@
   function afcRound() {
     const cfg = st.cfg;
     st.diff = Math.max(cfg.min, Math.min(cfg.max, st.diff));
-    timerEl.textContent = (st.taps + 1) + '/' + AFC_TAPS;
+    timerEl.textContent = Math.min(st.reversals.length, AFC_REVS) + '/' + AFC_REVS;
     instr.textContent = cfg.ask + '  ·  Δ ' + st.diff.toFixed(1) + cfg.unit;
     st.moreIsLeft = Math.random() < 0.5;
     let leftSVG, rightSVG;
@@ -311,6 +320,18 @@
       const lo = base;
       const draw = (deg) => `<line x1="60" y1="170" x2="${60 + Math.cos(deg * Math.PI / 180) * 130}" y2="${170 - Math.sin(deg * Math.PI / 180) * 130}" stroke="var(--ink)" stroke-width="4" stroke-linecap="round"/>`;
       leftSVG = draw(st.moreIsLeft ? hi : lo); rightSVG = draw(st.moreIsLeft ? lo : hi);
+    } else if (st.afc === 'curve') {
+      const base = rnd(0.14, 0.30);                          // bow as fraction of chord
+      const hi = base + st.diff / 100, lo = base;
+      const bowPath = (b) => { const x0 = 40, x1 = 230, y = 150; const mx = (x0 + x1) / 2, my = y - b * (x1 - x0);
+        return `<path d="M ${x0} ${y} Q ${mx} ${my} ${x1} ${y}" fill="none" stroke="var(--ink)" stroke-width="4" stroke-linecap="round"/>`; };
+      leftSVG = bowPath(st.moreIsLeft ? hi : lo); rightSVG = bowPath(st.moreIsLeft ? lo : hi);
+    } else if (st.afc === 'value') {
+      const base = rnd(28, 58);                              // darkness 0-100; higher = darker
+      const hi = base + st.diff, lo = base;
+      const patch = (dk) => { const g = Math.round(255 * (1 - dk / 100));
+        return `<rect x="70" y="70" width="120" height="120" rx="10" fill="rgb(${g},${g},${g})"/>`; };
+      leftSVG = patch(st.moreIsLeft ? hi : lo); rightSVG = patch(st.moreIsLeft ? lo : hi);
     } else {
       const base = rnd(90, 130);
       const hi = base * (1 + st.diff / 100), lo = base;
@@ -334,18 +355,18 @@
     const stepped = stairStep(st, correct);
     if (stepped.reversal) st.reversals.push(st.diff);
     st.diff = stepped.diff; st.streak = stepped.streak; st.lastDir = stepped.lastDir;
-    setRing(st.taps / AFC_TAPS, false, 'discriminate');
+    setRing(Math.min(1, st.reversals.length / AFC_REVS), false, 'discriminate');
     instr.textContent = correct ? '✓ Correct' : '✗ Not this time';
-    if (st.taps >= AFC_TAPS) { setTimeout(afcEnd, 420); }
+    if (st.reversals.length >= AFC_REVS || st.taps >= AFC_TAPS) { setTimeout(afcEnd, 420); }
     else setTimeout(afcRound, 420);
   }
   function afcEnd() {
     const cfg = st.cfg;
-    const revs = st.reversals.slice(-4);
+    const revs = st.reversals.slice(-6);
     const threshold = +(revs.length >= 2 ? revs.reduce((a, b) => a + b, 0) / revs.length : st.diff).toFixed(1);
     const elapsed = (performance.now() - st.t0) / 1000;
     const type = 'afc-' + st.afc;
-    const score = Math.max(0, Math.min(100, Math.round(100 - threshold * (st.afc === 'angle' ? 6 : 4))));
+    const score = Math.max(0, Math.min(100, Math.round(100 - threshold * (cfg.factor || 4))));
     A.store.addAttempt({
       ts: Date.now(), day: dayKey(), type, scored: true, level: 1,
       studySec: 0, drawSec: +elapsed.toFixed(1), score,
@@ -357,6 +378,7 @@
     const bests = A.store.get('afcBest', {});
     const isBest = bests[st.afc] == null || threshold < bests[st.afc];
     if (isBest) { bests[st.afc] = threshold; A.store.set('afcBest', bests); }
+    const lasts = A.store.get('afcLast', {}); lasts[st.afc] = threshold; A.store.set('afcLast', lasts);   // warm start for next run
     if (A.ui && A.ui.invalidate) A.ui.invalidate();
     timerEl.textContent = ''; setRing(0, false, '');
     instr.textContent = 'Discrimination threshold.';
@@ -374,5 +396,5 @@
   }
 
   A.Perceive = { start, startAFC, stairStep,
-                 kinds: ['angle', 'prop', 'curve', 'value'], afcKinds: ['angle', 'length'] };
+                 kinds: ['angle', 'prop', 'curve', 'value'], afcKinds: ['angle', 'length', 'curve', 'value'] };
 })(window.A = window.A || {});

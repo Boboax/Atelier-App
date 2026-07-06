@@ -19,6 +19,19 @@ No feature reaches `main` without a version bump.
 
 ---
 
+## 1.11.0 — Performance-contingent training
+
+Difficulty, spacing and promotion now respond to how you actually perform, not just the calendar — the highest-leverage cluster from the full training-science audit.
+
+- **Per-trial difficulty staircase**: the study clock tightens (×0.9) after a ≥90 score and relaxes (×1.15) below 70, keeping every trial near the 85%-rule sweet spot *between* promotions, not just at them.
+- **Review-contingent spacing**: passing a *due* review grows the gap; failing it shrinks it (the actual point of Leitner — a weak attempt can no longer silently clear a review). Intervals extend to 30 and 60 days for consolidated skills.
+- **Retention gate on promotion**: composite drills (polygons, envelopes, gesture, shadow shapes) hold an earned level-up as *pending* until a cold retention check passes — Lecoq's own standard, memory across a night's sleep. Simple figures (lines, angles, curves) have nothing episodic to recall overnight, so they promote on the window alone — and **retention checks now only ever serve composite figures**.
+- **Expanding recall lags**: each drill's retention checks stretch 1 → 3 → 7 → 14 days on success and reset on a clear failure (expanding retrieval; successive relearning).
+- **Honest gates**: skips after seeing the figure are counted (first per sitting free, then they enter the window as a weak score); glanced trials are scored and coached but no longer level evidence; the self-estimate no longer anchors at 70% (badge starts at "?", Reveal unlocks on your judgement) — the calibration stats stop being flattered by the anchor.
+- **Interleaving by default**: once a drill reaches level 3, its practice set weaves in 2 figures from due/weak drills; mixed sessions weight sampling toward due + weakest; the finisher is your *weakest* drill, not always envelope (contextual interference: blocked feels better, interleaved retains better).
+- **Discrimination (2AFC) made reliable**: runs now go to 8 reversals (30-trial cap) with a warm start near your last threshold and a 6-reversal average — enough signal to actually show week-over-week gains. Two new kinds: **Which bows more?** (curve) and **Which is darker?** (value).
+- **A brief hold from level 2** (1.5 s) so even early trials draw from encoded memory, not the afterimage; a ~1 s re-encode hold after each manual glance.
+
 ## 1.10.0 — Single-figure references
 
 At a real easel you never see a whole lithograph sheet beside your paper — the atelier masks the plate so **one figure** sits next to the drawing. The bundled Bargue plates are multi-figure sheets, which made the sight-size reference panel show two or three subjects at once.
