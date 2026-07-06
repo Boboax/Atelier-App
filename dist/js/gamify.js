@@ -7,20 +7,27 @@
    ========================================================================== */
 (function (A) {
   'use strict';
-  const LADDER = ['line', 'angles', 'curve', 'polygon', 'envelope'];   // classical order incl. curves
+  // The scored-drill ladder is DERIVED from the curriculum (call-time), so a
+  // newly added scored drill can never be silently left out of mastery points,
+  // weakest-drill targeting or spaced review again (it happened twice: curve,
+  // then gesture).
+  const LADDER = () => A.curr.EXERCISES.filter((e) => e.scored).map((e) => e.key);
 
   // ---- mastery & rank (driven by skill levels + passed plates, never volume) ----
   function masteryPoints() {
     let p = 0;
-    LADDER.forEach((k) => { p += A.curr.level(k); });
+    LADDER().forEach((k) => { p += A.curr.level(k); });
     const pl = A.store.get('percLevel', { angle: 1, prop: 1 });
-    p += (pl.angle || 1) + (pl.prop || 1);
+    ['angle', 'prop', 'curve', 'value'].forEach((k) => { p += (pl[k] || 1); });
     p += platesPassed();   // application layer counts too (max +4)
-    return p;              // floor 7 (all level 1), ceiling 65
+    return p;              // floor 11 (all level 1), ceiling ~99
   }
+  // Thresholds sit against the point FLOOR (every track starts at level 1:
+  // 7 drills + 4 perception kinds = 11 points) and the ~99 ceiling. Master ≈
+  // every track around level 5-6 — the same standard as before the curriculum grew.
   const RANKS = [
-    { name: 'Novice', at: 0 }, { name: 'Apprentice', at: 10 },
-    { name: 'Journeyman', at: 16 }, { name: 'Draughtsman', at: 24 }, { name: 'Master', at: 34 }
+    { name: 'Novice', at: 0 }, { name: 'Apprentice', at: 15 },
+    { name: 'Journeyman', at: 27 }, { name: 'Draughtsman', at: 40 }, { name: 'Master', at: 56 }
   ];
   function rank() {
     const p = masteryPoints(); let cur = RANKS[0], next = null;
@@ -36,8 +43,8 @@
   // badged, and the one "come back" badge rewards recovery, not guilt.
   const mean = (xs) => xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : 0;
   const lvl = (k) => A.curr.level(k);
-  const allLv = (n) => LADDER.every((k) => lvl(k) >= n);
-  const anyLv = (n) => LADDER.some((k) => lvl(k) >= n);
+  const allLv = (n) => LADDER().every((k) => lvl(k) >= n);
+  const anyLv = (n) => LADDER().some((k) => lvl(k) >= n);
   const percLv = () => A.store.get('percLevel', { angle: 1, prop: 1 });
   // Monday-aligned week index of a 'YYYY-MM-DD' key (alignment consistency is
   // what matters, not calendar correctness)
@@ -64,9 +71,9 @@
     // mastery
     { id: 'first90', icon: '◆', name: 'First 90', desc: 'Score 90+ on any drill', test: (c) => c.attempts.some((a) => a.scored && a.score >= 90) },
     { id: 'anyLv5', icon: '◈', name: 'Journeyman’s mark', desc: 'Reach level 5 in any drill', test: () => anyLv(5) },
-    { id: 'allLv5', icon: '⬗', name: 'Solid foundations', desc: 'All five drills at level 5+', test: () => allLv(5) },
+    { id: 'allLv5', icon: '⬗', name: 'Solid foundations', desc: 'Every drill at level 5+', test: () => allLv(5) },
     { id: 'anyLv9', icon: '❖', name: 'Master’s mark', desc: 'Reach level 9 in any drill', test: () => anyLv(9) },
-    { id: 'allLv9', icon: '✥', name: 'The full ladder', desc: 'All five drills at level 9', test: () => allLv(9) },
+    { id: 'allLv9', icon: '✥', name: 'The full ladder', desc: 'Every drill at level 9', test: () => allLv(9) },
     { id: 'sharpEye1', icon: '◉', name: 'Sharp eye', desc: 'Both perception drills at level 4+', test: () => { const p = percLv(); return (p.angle || 1) >= 4 && (p.prop || 1) >= 4; } },
     { id: 'sharpEye2', icon: '◎', name: 'Surgeon’s eye', desc: 'Both perception drills at level 8', test: () => { const p = percLv(); return (p.angle || 1) >= 8 && (p.prop || 1) >= 8; } },
     { id: 'quick', icon: '⚡', name: 'Quick study', desc: 'Score 85+ on a line with a ≤2s glance', test: (c) => c.attempts.some((a) => a.type === 'line' && a.score >= 85 && a.studySec <= 2) },
@@ -86,7 +93,7 @@
     { id: 'prop', icon: '▱', name: 'True proportion', desc: 'Proportion bias under 3% over 20 shapes', test: (c) => { const f = c.attempts.filter((a) => (a.type === 'polygon' || a.type === 'envelope') && a.metrics && a.metrics.aspectErrPct != null).slice(-20); return f.length >= 20 && Math.abs(mean(f.map((a) => a.metrics.aspectErrPct))) < 3; } },
     { id: 'honestHand', icon: '✋', name: 'Honest hand', desc: '50 first-look figures at level 6+ with zero glances', test: (c) => c.attempts.filter((a) => a.scored && !a.recall && a.level >= 6 && !a.glances).length >= 50 },
     // the honorary terminal — depth, not points
-    { id: 'masterAtelier', icon: '♛', name: 'Master of the Atelier', desc: 'All drills level 7+, the plate course passed, and a 30-day streak', test: (c) => LADDER.every((k) => lvl(k) >= 7) && platesPassed() >= 4 && c.bestStreak >= 30 }
+    { id: 'masterAtelier', icon: '♛', name: 'Master of the Atelier', desc: 'All drills level 7+, the plate course passed, and a 30-day streak', test: (c) => LADDER().every((k) => lvl(k) >= 7) && platesPassed() >= 4 && c.bestStreak >= 30 }
   ];
 
   // returns {now:[newly earned defs], earned:{id:ts}, all:ACH}
@@ -135,7 +142,7 @@
   function weakestDrill(attempts, minN) {
     minN = minN || 3;
     let worst = null, worstMean = Infinity;
-    for (const k of LADDER) {
+    for (const k of LADDER()) {
       const xs = (attempts || []).filter((a) => a.type === k && a.scored && !a.repeat && !a.recall)
                                  .slice(-5).map((a) => a.score);
       if (xs.length < minN) continue;
@@ -153,16 +160,17 @@
      DESCRIBES the day (any qualifying practice ticks a segment) rather than
      prescribing it — autonomy-supportive, per OPTIMAL theory. Completing the
      plan (not raw minutes) is what feeds the streak in 'plan' goal mode.     */
-  const PERC_TYPES = ['perc-angle', 'perc-prop'];
+  // all perception-drill attempt types (adjustment + forced-choice) count as warm-up
+  const PERC_TYPES = ['perc-angle', 'perc-prop', 'perc-curve', 'perc-value', 'afc-angle', 'afc-length'];
   function planPick(attempts) {
     const today = todayStr();
     const stored = A.store.get('planPick', null);
     if (stored && stored.day === today && A.curr.def(stored.exKey)) return stored.exKey;
     // priority: due for spaced review > weakest > ladder walk
-    const due = A.curr.dueDrills(today).filter((d) => LADDER.indexOf(d.key) >= 0);
+    const due = A.curr.dueDrills(today).filter((d) => LADDER().indexOf(d.key) >= 0);
     let pick = due.length ? due[0].key : null;
     if (!pick) { const w = weakestDrill(attempts); pick = w && w.exKey; }
-    if (!pick) pick = LADDER.find((k) => A.curr.level(k) < 3) || LADDER[0];
+    if (!pick) pick = LADDER().find((k) => A.curr.level(k) < 3) || LADDER()[0];
     A.store.set('planPick', { day: today, exKey: pick });
     return pick;
   }
@@ -230,7 +238,7 @@
   function recommend(attempts) {
     const now = Date.now();
     const today = todayStr();
-    const percTs = (attempts || []).filter((a) => a.type === 'perc-angle' || a.type === 'perc-prop').map((a) => a.ts);
+    const percTs = (attempts || []).filter((a) => PERC_TYPES.indexOf(a.type) >= 0).map((a) => a.ts);
     const lastPerc = percTs.length ? Math.max.apply(null, percTs) : 0;
     if (!(lastPerc && now - lastPerc < WARM_MS)) {
       return { step: 'warmup', title: 'Warm up your eye', sub: 'a short perception warm-up (~8 rounds, no drawing) to prime accurate seeing' };
@@ -243,7 +251,7 @@
     if (!doneRecallToday && oldScored.length) {
       return { step: 'recall', title: 'Retention check', sub: 'redraw a figure from a previous day — cold, from memory alone' };
     }
-    const order = LADDER;
+    const order = LADDER();
     const minLvl = Math.min.apply(null, order.map((k) => A.curr.level(k)));
     if (minLvl < GRAD) {                                  // Foundations: walk the ladder
       const pick = order.find((k) => A.curr.level(k) < GRAD) || order[0];
@@ -251,7 +259,7 @@
     }
     // Spaced review: serve the most-overdue drill before anything new — skills
     // decay on their own schedule, and distributed retrieval is what holds them.
-    const due = A.curr.dueDrills(today).filter((d) => LADDER.indexOf(d.key) >= 0);
+    const due = A.curr.dueDrills(today).filter((d) => LADDER().indexOf(d.key) >= 0);
     if (due.length) {
       const pick = due[0].key;
       const late = -due[0].due;

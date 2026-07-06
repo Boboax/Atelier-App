@@ -264,6 +264,50 @@
     return placeGesture(pool[Math.floor(Math.random() * pool.length)]);
   };
 
+  /* ---- terminator (light & shadow): the classical value drill --------------
+     A simple lit form (sphere → egg → cylinder) with a light direction; the
+     ground truth is the TERMINATOR — the boundary where light turns to shadow.
+     During study the form renders shaded with a visible core-shadow edge; the
+     learner then draws that boundary from memory ON the bare contour. Scored
+     position-fixed (scoreCurveFixed): the right bow in the wrong place is a
+     miss. Levels: sphere with near-flat light → egg → stronger bow (light
+     tilted toward the viewer) → rotated egg → cylinder.                     */
+  gen.shade = function (level) {
+    const type = level <= 2 ? 'sphere' : level <= 4 ? 'egg' : (level >= 7 && Math.random() < 0.5) ? 'cyl' : 'egg';
+    const cx = rnd(0.44, 0.56), cy = rnd(0.44, 0.56);
+    let rx, ry, rot = 0;
+    if (type === 'sphere') { rx = ry = rnd(0.24, 0.3); }
+    else if (type === 'egg') { rx = rnd(0.2, 0.26); ry = rx * rnd(1.2, 1.45); rot = level >= 5 ? rnd(-0.5, 0.5) : 0; }
+    else { rx = rnd(0.11, 0.15); ry = rx * rnd(2.2, 2.8); rot = rnd(-0.35, 0.35); }
+    // light angle (unit-circle space) — avoid near-vertical-from-top ambiguity a little
+    const phi = rnd(0, Math.PI * 2);
+    // bow of the terminator: light tilted toward the viewer → stronger curve
+    const k = level <= 2 ? rnd(0.12, 0.2) : level <= 5 ? rnd(0.15, 0.3) : rnd(0.2, 0.42);
+    const co = Math.cos(rot), si = Math.sin(rot);
+    const toDesign = (ux, uy) => {   // unit circle → ellipse → rotate → place
+      const ex = ux * rx, ey = uy * ry;
+      return [cx + ex * co - ey * si, cy + ex * si + ey * co];
+    };
+    const u = [Math.cos(phi), Math.sin(phi)];            // toward the light
+    const v = [-u[1], u[0]];                              // ⊥ light
+    const term = [];
+    for (let i = 0; i <= 32; i++) {
+      const t = -Math.PI / 2 + (i / 32) * Math.PI;        // pole to pole
+      const px = Math.sin(t) * v[0] + Math.cos(t) * k * u[0];
+      const py = Math.sin(t) * v[1] + Math.cos(t) * k * u[1];
+      term.push(toDesign(px, py));
+    }
+    const contour = [];
+    for (let i = 0; i < 48; i++) { const a = (i / 48) * Math.PI * 2; contour.push(toDesign(Math.cos(a), Math.sin(a))); }
+    // shadow region polygon: terminator (−v pole → +v pole) + the silhouette arc
+    // back around the dark side (through −u) — used for the study-phase fill
+    const shadow = term.slice();
+    const av = Math.atan2(v[1], v[0]);
+    for (let i = 1; i < 32; i++) { const a = av + (i / 32) * Math.PI; shadow.push(toDesign(Math.cos(a), Math.sin(a))); }
+    return { kind: 'shade', polyline: term, contour, shadow,
+             form: { type, cx, cy, rx, ry, rot }, light: { x: u[0], y: u[1], k } };
+  };
+
   // Dispatch by exercise key.
   gen.make = function (exKey, level) {
     switch (exKey) {
@@ -273,6 +317,7 @@
       case 'polygon': return gen.polygon(level);
       case 'envelope': return gen.envelope(level);
       case 'gesture': return gen.gesture(level);
+      case 'shade': return gen.shade(level);
       default: return gen.line(level);
     }
   };

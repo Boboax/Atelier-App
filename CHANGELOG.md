@@ -19,6 +19,21 @@ No feature reaches `main` without a version bump.
 
 ---
 
+## 1.7.0 — Value module, perception suite, zoom & pan
+
+**New training content**
+- **Terminator (Light & Shadow)** — the classical value drill, procedurally generated and objectively scored: study a lit form (sphere → egg → cylinder, light direction varies), then draw the shadow line from memory ON the bare form. Both the bow and the position are scored (a new position-fixed curve metric). Completes the line → shape → value arc.
+- **Two new perception warm-ups**: Judge curve (bow memory) and Judge value (grey/tone memory), each with its own adaptive level.
+- **Discrimination (2AFC staircase)**: "Which line is steeper / longer?" — forced choice with immediate feedback and an adaptive 2-down-1-up staircase that measures the smallest difference your eye can catch. Thresholds tracked in Stats ("Discrimination" card); personal best per kind.
+
+**Drawing & UI**
+- **Pinch zoom & pan** on the drawing canvas (two fingers; the pen keeps drawing) with a floating reset chip — lean in for detail on plates and references, step back to judge the whole.
+- **Pace setting** (Standard / Relaxed +50%) for learners who find the adaptive study/draw clocks rushed.
+- **History filter chips** by drill (with a per-drill progress chart when filtered); the Stats accuracy chart is filterable by drill too.
+
+**Structural fix**
+- The scored-drill ladder, session queues and warm-up types are now **derived from the curriculum** instead of hand-maintained lists — gesture had silently been missing from mastery points, weakest-drill targeting and spaced review (the same bug that once hit curve). Rank thresholds rebased to the grown curriculum (Master still ≈ every track at level 5–6).
+
 ## 1.6.0 — Scoring re-audit, real-subject scoring, drawing feel & teaching
 
 **Scoring (a full adversarial re-audit of every exercise — several were too generous)**

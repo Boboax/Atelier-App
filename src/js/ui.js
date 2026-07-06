@@ -19,13 +19,16 @@
   // erodes accuracy (deliberate practice); a warm-up is a brief ~5 min priming bout.
   // Distributed practice (several short sessions) beats one long massed sitting.
   const SESSIONS = { warmup: { n: 6, min: 5 }, mixed: { n: 12, min: 15 } };
-  const PERC_LABELS = { 'perc-angle': 'Perceive: Angle', 'perc-prop': 'Perceive: Proportion' };
+  const PERC_LABELS = { 'perc-angle': 'Perceive: Angle', 'perc-prop': 'Perceive: Proportion',
+    'perc-curve': 'Perceive: Curve', 'perc-value': 'Perceive: Value',
+    'afc-angle': 'Discriminate: Angle', 'afc-length': 'Discriminate: Length' };
   const exName = (type) => { const d = A.curr.def(type); return d ? d.name : (PERC_LABELS[type] || type); };
   const LOOKCUE = {
     line: 'its slant & length', angles: 'the angles between & the relative lengths',
     curve: 'its start, end & apex — the furthest point it bows out',
     polygon: 'each corner’s position & the proportions', envelope: 'the outer envelope, then where the contour turns sharply vs flows',
     gesture: 'the line of action — the single sweep from head to foot',
+    shade: 'where the light turns to shadow — the terminator\u2019s path across the form',
     contour: 'the path of the edge', negative: 'the empty shapes between the forms',
     bargue: 'the big straight block-in', value: 'where light turns to dark',
     master: 'the largest shapes & their placement'
@@ -120,13 +123,19 @@
     else if (step === 'resume') resumeSession();
     else if (step === 'mixed') { const sv = savedSession(); if (sv && sv.kind === 'mixed') resumeSession(); else startSession('mixed'); }
   }
-  // alternate the warm-up between angle and proportion (the app teaches doing
-  // both); prefer whichever perception skill is at the lower level
+  // rotate the warm-up across all judgement kinds, always preferring the one
+  // at the lowest level (the weakest perceptual skill gets the reps)
   function startWarmup() {
-    const pl = A.store.get('percLevel', { angle: 1, prop: 1 });
-    if ((pl.angle || 1) !== (pl.prop || 1)) { A.Perceive.start((pl.angle || 1) <= (pl.prop || 1) ? 'angle' : 'prop'); return; }
-    const last = A.store.get('lastWarmKind', 'prop');
-    const kind = last === 'angle' ? 'prop' : 'angle';
+    const kinds = A.Perceive.kinds;
+    const pl = A.store.get('percLevel', {});
+    const minLv = Math.min.apply(null, kinds.map((k) => pl[k] || 1));
+    const lowest = kinds.filter((k) => (pl[k] || 1) === minLv);
+    let kind;
+    if (lowest.length === 1) kind = lowest[0];
+    else {
+      const last = A.store.get('lastWarmKind', '');
+      kind = lowest[(lowest.indexOf(last) + 1) % lowest.length];   // round-robin the ties
+    }
     A.store.set('lastWarmKind', kind);
     A.Perceive.start(kind);
   }
@@ -373,15 +382,26 @@
         <button class="btn ghost" data-session="warmup">${lbl('warmup', `Quick session · ${SESSIONS.warmup.n} · ~${SESSIONS.warmup.min} min`)}</button></div>
       <div class="tiny muted" style="margin-top:8px">Mixed = a full workout · Quick = a short version when time’s tight.</div></div>
       <div class="card"><h2>Perception warm-up <span class="tag self">2–3 min</span></h2>
-      <p class="small muted" style="margin:4px 0 10px"><b>When:</b> at the <b>start of every session</b> (and again if you come back hours later). No drawing — you just judge angles and proportions to prime your eye, because misperceiving the subject (not the hand) is the main cause of inaccurate drawing. Do <b>Judge angle</b> before Lines &amp; Angles, <b>Judge proportion</b> before Polygons &amp; Envelopes. Both level up on their own.</p>
-      <div class="row wrap"><button class="btn soft" data-perc="angle">Judge angle · Lv ${A.store.get('percLevel', { angle: 1 }).angle || 1}</button>
-        <button class="btn soft" data-perc="prop">Judge proportion · Lv ${A.store.get('percLevel', { prop: 1 }).prop || 1}</button></div></div>`;
+      <p class="small muted" style="margin:4px 0 10px"><b>When:</b> at the <b>start of every session</b> (and again if you come back hours later). No drawing — you just judge to prime your eye, because misperceiving the subject (not the hand) is the main cause of inaccurate drawing. Each judgement levels up on its own.</p>
+      <div class="row wrap">${['angle', 'prop', 'curve', 'value'].map((k) => {
+        const pl = A.store.get('percLevel', {});
+        const names = { angle: 'Judge angle', prop: 'Judge proportion', curve: 'Judge curve', value: 'Judge value' };
+        return `<button class="btn soft" data-perc="${k}">${names[k]} · Lv ${pl[k] || 1}</button>`;
+      }).join('')}</div>
+      <p class="small muted" style="margin:12px 0 8px"><b>Discriminate</b> — forced choice: which is steeper / longer? An adaptive staircase finds the smallest difference your eye can catch, then pushes it finer. Watch the threshold fall over weeks.</p>
+      <div class="row wrap">${['angle', 'length'].map((k) => {
+        const best = A.store.get('afcBest', {})[k];
+        const names = { angle: 'Which is steeper?', length: 'Which is longer?' };
+        const unit = k === 'angle' ? '°' : '%';
+        return `<button class="btn soft" data-afc="${k}">${names[k]}${best != null ? ` · best ${best}${unit}` : ''}</button>`;
+      }).join('')}</div></div>`;
     v.innerHTML = `${recLine(all)}<div class="banner">Not sure where to start? Use the <b>recommended</b> step above. Otherwise, pick any single drill or a guided session below.</div>${sessions}${groups}`;
     v.onclick = (e) => {
       const rc = e.target.closest('[data-rec]'); if (rc) { doRec(rc.dataset.rec, rc.dataset.recex); return; }
       const s = e.target.closest('[data-session]');
       if (s) { const sv2 = savedSession(); if (sv2 && sv2.kind === s.dataset.session) resumeSession(); else startSession(s.dataset.session); return; }
       const p = e.target.closest('[data-perc]'); if (p) { A.Perceive.start(p.dataset.perc); return; }
+      const f = e.target.closest('[data-afc]'); if (f) { A.Perceive.startAFC(f.dataset.afc); return; }
       const b = e.target.closest('[data-ex]'); if (b) startExercise(b.dataset.ex);
     };
   }
@@ -458,11 +478,16 @@
       <button class="closeX" id="d-close" aria-label="Close drill">✕</button>
       <button class="closeX" id="d-help" style="right:58px;font-weight:600" aria-label="How this drill works">?</button>
       <canvas id="d-canvas"></canvas>
+      <button class="btn soft sm" id="d-zoomreset" style="display:none" aria-label="Reset zoom">⤢ 100%</button>
       <div id="d-result"></div>
       <div class="controls" id="d-controls"></div>
     </div>`);
     document.body.appendChild(d);
     surface = new A.Surface($('#d-canvas', d), { pencilOnly: A.store.get('pencilOnly', false), baseWidth: A.store.get('inkWidth', 3.2), smooth: A.store.get('smooth', 0.5) });
+    // pinch zoom (two fingers) — show a reset chip while zoomed in
+    const zr = $('#d-zoomreset', d);
+    surface.onViewChange = (z) => { zr.style.display = z > 1.02 ? 'block' : 'none'; };
+    zr.addEventListener('pointerup', (e) => { e.preventDefault(); surface.resetView(); });
     drill = new A.Drill(surface);
     drill.onState = updateDrill;
     drill.onTick = updateTimer;
@@ -550,11 +575,12 @@
   }
   function startSession(kind) {
     const cfg = SESSIONS[kind] || SESSIONS.mixed;
-    // the full scored ladder — leaving one out (curve, historically) let the
-    // recommendation engine demand a drill sessions never actually served
+    // DERIVED from the curriculum so a new scored drill can never be left out
+    // of sessions again (it happened with curve, then gesture)
+    const allScored = A.curr.EXERCISES.filter((e) => e.scored).map((e) => e.key);
     const queue = kind === 'warmup'
-      ? shuffledQueue(['line', 'angles', 'curve', 'polygon'], cfg.n)
-      : shuffledQueue(['line', 'angles', 'curve', 'polygon', 'envelope', 'gesture'], cfg.n);
+      ? shuffledQueue(allScored.slice(0, 4), cfg.n)          // quick session: the foundations
+      : shuffledQueue(allScored, cfg.n);
     session = { kind, queue, completed: 0, results: [], day: A.habit.today() };
     // mixed sessions end on a FINISHER: the capstone drill one level up
     // (peak-end rule — the session's last memory is a real challenge). It never
@@ -1111,12 +1137,31 @@
   /* ======================================================================
      STATS
      ====================================================================== */
+  let statsCat = 'all';
   async function renderStats(v) {
     const all = await attempts();
     if (!all.length) { v.innerHTML = `<div class="card"><h2>Statistics</h2><p class="muted small">No drills yet — practise a little and your accuracy trends, calibration bias and study-time curve will appear here.</p></div>`; return; }
     const sum = A.stats.summary(all);
-    const trend = A.stats.dailyTrend(all);
+    const trend = A.stats.dailyTrend(all, statsCat === 'all' ? null : statsCat);
+    const trendTypes = Array.from(new Set(all.filter((a) => a.scored && !PERC_LABELS[a.type]).map((a) => a.type)));
+    const trendChips = [`<button class="chip ${statsCat === 'all' ? 'active' : ''}" data-tcat="all">All</button>`]
+      .concat(trendTypes.map((t) => `<button class="chip ${statsCat === t ? 'active' : ''}" data-tcat="${t}">${esc(exName(t).split(' ')[0])}</button>`)).join('');
     const byType = Object.values(sum.byType).map((t) => ({ label: exName(t.type), value: t.mean, suffix: '' }));
+
+    // discrimination thresholds (2AFC): lower = a finer eye — plot so up = better
+    let afcCard = '';
+    const afcKinds = [['afc-angle', '°', 'angle'], ['afc-length', '%', 'length']];
+    const afcRows = afcKinds.map(([type, unit, label]) => {
+      const runs = all.filter((a) => a.type === type && a.metrics && a.metrics.threshold != null);
+      if (!runs.length) return '';
+      const byDay = {};
+      runs.forEach((a) => { (byDay[a.day] || (byDay[a.day] = [])).push(a.metrics.threshold); });
+      const t = Object.keys(byDay).sort().map((d) => ({ day: d, score: Math.max(0, Math.min(100, Math.round(100 - (byDay[d].reduce((x, y) => x + y, 0) / byDay[d].length) * (type === 'afc-angle' ? 6 : 4)))) }));
+      const best = A.store.get('afcBest', {})[label];
+      return `<div class="small muted" style="margin-top:6px">${esc(exName(type))} — best threshold <b>${best != null ? best + unit : '—'}</b> (lower = finer)</div>${A.charts.line(t)}`;
+    }).filter(Boolean).join('');
+    if (afcRows) afcCard = `<div class="card"><h2>Discrimination</h2>
+      <div class="small muted">the smallest difference your eye can catch — sharpening this is sharpening the eye itself</div>${afcRows}</div>`;
 
     // calibration insights for scored types that have data — each with a
     // "practice this" hand-off so Stats is a springboard, not a cul-de-sac
@@ -1187,7 +1232,9 @@
           <div class="k"><div class="v">${sum.days}</div><div class="l">days active</div></div>
           <div class="k"><div class="v">🔥 ${A.habit.streak()}</div><div class="l">streak</div></div>
         </div></div>
-      <div class="card"><h2>Accuracy over time</h2><div class="small muted">daily mean across all drills</div>${A.charts.line(trend)}</div>
+      <div class="card"><h2>Accuracy over time</h2><div class="small muted">daily mean — tap a drill to isolate it</div>
+        <div class="chips" style="margin:8px 0 4px">${trendChips}</div>${A.charts.line(trend)}</div>
+      ${afcCard}
       ${progressCard}
       ${retCard}
       <div class="card"><h2>By exercise</h2>${A.charts.bars(byType)}</div>
@@ -1198,6 +1245,7 @@
         <div class="small muted">each dot is one scored drill — does a longer glance actually help you?</div>
         ${A.charts.scatter(sva)}</div>`;
     v.onclick = (e) => {
+      const tc = e.target.closest('[data-tcat]'); if (tc) { statsCat = tc.dataset.tcat; renderStats(v); return; }
       const c = e.target.closest('[data-cmp]'); if (c) { showCompare(all, c.dataset.cmp); return; }
       const f = e.target.closest('[data-focus]'); if (f) { startExercise(f.dataset.focus); return; }
       const p = e.target.closest('[data-perc]'); if (p) A.Perceive.start(p.dataset.perc);
@@ -1240,18 +1288,33 @@
   /* ======================================================================
      HISTORY
      ====================================================================== */
+  let histCat = 'all';
   async function renderHistory(v) {
     const all = (await attempts()).slice().sort((a, b) => b.ts - a.ts);
     if (!all.length) { v.innerHTML = `<div class="card"><h2>History</h2><p class="muted small">Your saved drills will appear here as a gallery you can replay.</p></div>`; return; }
-    const cells = all.slice(0, 200).map((a) => {
-      const dt = new Date(a.ts);
+    // filter chips: only the types that actually have attempts
+    const types = Array.from(new Set(all.map((a) => a.type))).filter((t) => !PERC_LABELS[t]);
+    const chips = [`<button class="chip ${histCat === 'all' ? 'active' : ''}" data-cat="all">All</button>`]
+      .concat(types.map((t) => `<button class="chip ${histCat === t ? 'active' : ''}" data-cat="${t}">${esc(exName(t).split(' ')[0])}</button>`)).join('');
+    const shown = histCat === 'all' ? all : all.filter((a) => a.type === histCat);
+    const cells = shown.slice(0, 200).map((a) => {
       return `<div class="cell" data-att="${a.id}">${A.history.thumbSVG(a, 130)}
         <div class="cap"><span>${esc(exName(a.type).split(' ')[0])}${a.recall ? ' ⟲' : ''}</span>
         <span class="sc ${scoreClass(a.score)}">${a.score}${a.selfRated ? '*' : ''}</span></div></div>`;
     }).join('');
-    v.innerHTML = `<div class="card"><div class="row between center"><h2>History</h2><span class="muted small">${all.length} drills · * = self-rated</span></div></div>
-      <div class="gal">${cells}</div>`;
-    v.onclick = (e) => { const c = e.target.closest('[data-att]'); if (c) showAttempt(all.find((x) => x.id == c.dataset.att)); };
+    // per-drill mini progress line when filtered
+    let trendCard = '';
+    if (histCat !== 'all') {
+      const t = A.stats.dailyTrend(shown.slice().reverse(), histCat);
+      if (t.length >= 2) trendCard = `<div class="card"><h2>${esc(exName(histCat))} — progress</h2>${A.charts.line(t)}</div>`;
+    }
+    v.innerHTML = `<div class="card"><div class="row between center"><h2>History</h2><span class="muted small">${shown.length} drills · * = self-rated</span></div></div>
+      <div class="chips">${chips}</div>${trendCard}
+      <div class="gal">${cells || '<div class="muted small">Nothing in this category yet.</div>'}</div>`;
+    v.onclick = (e) => {
+      const ch = e.target.closest('[data-cat]'); if (ch) { histCat = ch.dataset.cat; renderHistory(v); return; }
+      const c = e.target.closest('[data-att]'); if (c) showAttempt(all.find((x) => x.id == c.dataset.att));
+    };
   }
 
   function showAttempt(a) {
@@ -1457,6 +1520,8 @@
           <div class="stepper"><button data-ink="-0.4">−</button><b id="inkv">${inkW.toFixed(1)}</b><button data-ink="0.4">+</button></div></div>
         <div class="setrow"><div><div>Line smoothing</div><div class="small muted">steadies shaky strokes — raise it if lines come out wobbly</div></div>
           <button class="btn ghost sm" id="smoothmode">${esc({ 0: 'Off', 0.3: 'Light', 0.5: 'Medium', 0.72: 'Strong' }[A.store.get('smooth', 0.5)] || 'Medium')}</button></div>
+        <div class="setrow"><div><div>Pace</div><div class="small muted">Relaxed stretches suggested study &amp; draw times by 50%</div></div>
+          <button class="btn ghost sm" id="pacemode">${A.store.get('pace', 'standard') === 'relaxed' ? 'Relaxed' : 'Standard'}</button></div>
         <div class="setrow"><div><div>Sighting guides</div><div class="small muted">plumb line, horizon, thirds, angle ticks</div></div>
           <button class="btn ghost sm" id="guidesmode">${esc({ auto: 'Auto (fades)', on: 'Always on', off: 'Off' }[A.store.get('guidesMode', 'auto')])}</button></div>
         <div class="setrow"><div><div>Introduction</div><div class="small muted">replay the welcome guide</div></div>
@@ -1493,6 +1558,7 @@
     $('#sw-pencil', v).onclick = () => { A.store.set('pencilOnly', !pencilOnly); surface.opts.pencilOnly = !pencilOnly; renderSettings(v); };
     $('#guidesmode', v).onclick = () => { const cur = A.store.get('guidesMode', 'auto'); const nxt = { auto: 'on', on: 'off', off: 'auto' }[cur]; A.store.set('guidesMode', nxt); renderSettings(v); };
     $('#smoothmode', v).onclick = () => { const cur = A.store.get('smooth', 0.5); const nxt = { 0: 0.3, 0.3: 0.5, 0.5: 0.72, 0.72: 0 }[cur]; A.store.set('smooth', nxt == null ? 0.5 : nxt); surface.opts.smooth = A.store.get('smooth', 0.5); renderSettings(v); };
+    $('#pacemode', v).onclick = () => { A.store.set('pace', A.store.get('pace', 'standard') === 'relaxed' ? 'standard' : 'relaxed'); renderSettings(v); };
     $('#replayintro', v).onclick = () => showOnboarding();
     $('#export', v).onclick = exportBackup;
     $('#import', v).onchange = importBackup;

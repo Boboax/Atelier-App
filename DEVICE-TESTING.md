@@ -31,7 +31,11 @@ iPad with the Apple Pencil after each install. ✅ / ❌ / note.
 - [ ] **Dark mode**: switch iPad appearance — chrome goes dark, drawing paper stays white, everything stays legible.
 - [ ] **Gesture drill** (Module 3): the study screen shows a figure (head + mass ovals + line of action); after hiding, drawing the sweep from memory scores sensibly.
 - [ ] **Teaching layer**: after a scored reveal, "Why & how" expands a principle card matched to your error.
-- [ ] **Real-subject auto-score**: on a Bargue plate or imported photo, "Score against the reference" highlights the subject (auto-tuned) and gives an overlap score; the threshold/invert sliders and panel-select adjust it.
+- [ ] **Real-subject auto-score**: on a Bargue plate or imported photo, "Score against the reference" highlights the subject (auto-tuned) and gives an overlap score; the threshold/invert sliders and panel-select adjust it. On a line-art plate it reports "line match · block-in" instead.
+- [ ] **Terminator drill** (Module 4): study shows a convincingly lit form with a clear shadow edge; drawing the boundary from memory on the bare form scores sensibly (wrong side of the form scores low).
+- [ ] **Pinch zoom**: two fingers zoom/pan the canvas mid-drill (pen still draws; a young accidental finger stroke gives way to the pinch); the "⤢ 100%" chip appears and resets.
+- [ ] **New warm-ups**: Judge curve and Judge value run and level up; the Discriminate (steeper/longer) staircase completes in ~16 taps and reports a threshold.
+- [ ] **Pace = Relaxed** visibly lengthens the suggested study/draw clocks.
 - [ ] Estimate-before-reveal works; reveal card sits at the **bottom** and the red-vs-ink comparison is visible above it.
 - [ ] Guides/Flip buttons show on/off state; guides fade out by level.
 - [ ] Staged Bargue: envelope → facet → refine, with Reveal at the last stage.

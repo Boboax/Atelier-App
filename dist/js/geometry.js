@@ -415,6 +415,29 @@
     return { score, iou, metrics: { iou, dev: +dev.toFixed(4) } };
   };
 
+  /* ---- FIXED-POSITION curve scoring ---------------------------------------
+     Like scoreCurve but WITHOUT endpoint alignment: where the curve sits
+     matters. Used for the terminator drill — drawing the shadow boundary on
+     the wrong part of the form is a miss, even if the bow shape is right.
+     Deviation is normalised by scaleRef (e.g. the form's radius).            */
+  geom.scoreCurveFixed = function (targetPolyline, userPts, scaleRef) {
+    if (!userPts || userPts.length < 2 || extentOf(userPts) < MIN_EXTENT) {
+      return { score: 0, iou: 0, metrics: { degenerate: true } };
+    }
+    const N = 64;
+    const T = geom.resample(targetPolyline, N);
+    let U = geom.resample(userPts, N);
+    const tvx = T[N - 1][0] - T[0][0], tvy = T[N - 1][1] - T[0][1];
+    const uvx = U[N - 1][0] - U[0][0], uvy = U[N - 1][1] - U[0][1];
+    if (tvx * uvx + tvy * uvy < 0) U = U.slice().reverse();   // drawn the other way → flip
+    const scale = Math.max(scaleRef || 0, 1e-3);
+    let s = 0; for (let i = 0; i < N; i++) s += Math.hypot(U[i][0] - T[i][0], U[i][1] - T[i][1]);
+    const dev = s / N / scale;
+    const score = Math.round(Math.max(0, Math.min(100, 100 - dev * 260)));
+    const iou = +(score / 100).toFixed(3);
+    return { score, iou, metrics: { iou, dev: +dev.toFixed(4) } };
+  };
+
   /* ---- Convex hull (used by generators & for cleaning user polygons) ----- */
   geom.convexHull = function (points) {
     const pts = points.slice().sort((a, b) => a[0] - b[0] || a[1] - b[1]);
