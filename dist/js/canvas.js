@@ -24,6 +24,33 @@
 
   const UNDO_MAX = 24;
 
+  // the chrome is themed by CSS, but the canvas paints its own world: a warm
+  // paper sheet on a quiet desk. Watch the scheme so dark mode dims the desk
+  // (not the sheet — ink drawings and Bargue plates are dark-on-white).
+  const DARKMQ = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)');
+  const isDark = () => !!(DARKMQ && DARKMQ.matches);
+  const REDUCEMQ = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)');
+
+  // paper grain: one tiny noise tile rendered ONCE, then tiled as a pattern at
+  // very low alpha — one fillRect per redraw, so it can never slow the stroke path
+  let _grainTile = null;
+  function grainPattern(ctx) {
+    if (!_grainTile) {
+      const cv = document.createElement('canvas');
+      cv.width = cv.height = 128;
+      const g = cv.getContext('2d');
+      const id = g.createImageData(128, 128);
+      for (let i = 0; i < id.data.length; i += 4) {
+        const v = 118 + (Math.random() * 72 | 0);   // mid-grey speckle, alpha does the subtlety
+        id.data[i] = id.data[i + 1] = id.data[i + 2] = v;
+        id.data[i + 3] = 255;
+      }
+      g.putImageData(id, 0, 0);
+      _grainTile = cv;
+    }
+    return ctx.createPattern(_grainTile, 'repeat');
+  }
+
   function Surface(canvas, opts) {
     this.canvas = canvas;
     // alpha:false — we always paint an opaque paper background, so an opaque
@@ -72,6 +99,9 @@
     this._undoStack = [];
     this.cssW = 0; this.cssH = 0;
     this._dpr = window.devicePixelRatio || 1;
+    this._revealFrac = 1;      // 0→1 while the reveal target draws itself in
+    this._revealRaf = 0;
+    this._grainPat = null;     // per-context pattern (built lazily from the shared tile)
     this._bind();
     this.resize();
   }
@@ -88,6 +118,8 @@
     c.addEventListener('pointerover', (e) => { if (e.pointerType === 'pen') this._penSeen = performance.now(); });
     window.addEventListener('resize', () => this.resize());
     window.addEventListener('orientationchange', () => setTimeout(() => this.resize(), 60));
+    // theme flips (auto sunset switch) must repaint the desk immediately
+    if (DARKMQ && DARKMQ.addEventListener) DARKMQ.addEventListener('change', () => this.redraw());
   };
 
   // Measure the canvas's CURRENT on-screen rect and size the backing store to it.
@@ -538,6 +570,7 @@
     this.measureMode = false; this.measures = []; this._curMeasure = null; this._measuring = false;
     this.sightSize = false; this.refBox = null; this.stepBack = false;
     this.stringLine = null; this.stringMode = false; this._stringing = false; this._flickUntil = 0;
+    cancelAnimationFrame(this._revealRaf); this._revealFrac = 1;
     this._undoStack = [];
     this.view = { z: 1, tx: 0, ty: 0 }; this._pinch = null;
     if (this.onViewChange) this.onViewChange(1);
@@ -547,8 +580,26 @@
   Surface.prototype.setTarget = function (t) { this.target = t; this.redraw(); };
   Surface.prototype.setPhase = function (phase) {
     this.showTarget = (phase === 'study');
+    const wasReveal = this.revealTarget;
     this.revealTarget = (phase === 'reveal');
+    // the reveal is the emotional peak — the target line draws itself in over
+    // ~400ms (arc-length tween, once per reveal; skipped for reduced motion)
+    if (this.revealTarget && !wasReveal && this.target) this._startRevealAnim();
+    else if (!this.revealTarget) { cancelAnimationFrame(this._revealRaf); this._revealFrac = 1; }
     this.redraw();
+  };
+  Surface.prototype._startRevealAnim = function () {
+    cancelAnimationFrame(this._revealRaf);
+    if (REDUCEMQ && REDUCEMQ.matches) { this._revealFrac = 1; return; }
+    this._revealFrac = 0;
+    const t0 = performance.now(), dur = 400;
+    const step = (t) => {
+      const p = Math.min(1, (t - t0) / dur);
+      this._revealFrac = p * (2 - p);           // ease-out — fast attack, gentle landing
+      this.redraw();
+      if (p < 1) this._revealRaf = requestAnimationFrame(step);
+    };
+    this._revealRaf = requestAnimationFrame(step);
   };
   Surface.prototype.setGhost = function (img, opacity) {
     this.ghost = img ? { img, opacity: opacity == null ? 0.4 : opacity } : null;
@@ -572,23 +623,49 @@
   };
 
   /* ---- rendering ---------------------------------------------------------*/
-  Surface.prototype._drawTargetGeom = function (ctx, color, fill, lineW) {
+  // stroke a polyline (px coords) up to an arc-length fraction — drives the
+  // reveal draw-in tween. frac >= 1 takes the plain full path.
+  Surface.prototype._strokePartial = function (ctx, pts, frac, close) {
+    if (pts.length < 2) return;
+    if (close && frac < 1) pts = pts.concat([pts[0]]);   // walk the perimeter, don't closePath mid-tween
+    ctx.beginPath();
+    ctx.moveTo(pts[0][0], pts[0][1]);
+    if (frac >= 1) {
+      for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i][0], pts[i][1]);
+      if (close) ctx.closePath();
+    } else {
+      let total = 0; const acc = [0];
+      for (let i = 1; i < pts.length; i++) { total += Math.hypot(pts[i][0] - pts[i - 1][0], pts[i][1] - pts[i - 1][1]); acc.push(total); }
+      const lim = total * frac;
+      for (let i = 1; i < pts.length; i++) {
+        if (acc[i] <= lim) { ctx.lineTo(pts[i][0], pts[i][1]); continue; }
+        const seg = (acc[i] - acc[i - 1]) || 1, r = (lim - acc[i - 1]) / seg;
+        ctx.lineTo(pts[i - 1][0] + (pts[i][0] - pts[i - 1][0]) * r, pts[i - 1][1] + (pts[i][1] - pts[i - 1][1]) * r);
+        break;
+      }
+    }
+    ctx.stroke();
+  };
+
+  Surface.prototype._drawTargetGeom = function (ctx, color, fill, lineW, frac) {
     const t = this.target; if (!t) return;
+    const f = frac == null ? 1 : frac;
+    if (f <= 0) return;
+    const px = (pts) => pts.map((p) => this.toPx(p));
     ctx.save();
     ctx.strokeStyle = color; ctx.lineWidth = lineW || 2.5;
     ctx.lineJoin = 'round'; ctx.lineCap = 'round';
     if (t.kind === 'line' || t.kind === 'angles') {
       for (const ln of t.lines) {
         const a = this.toPx(ln[0]), b = this.toPx(ln[1]);
-        ctx.beginPath(); ctx.moveTo(a[0], a[1]); ctx.lineTo(b[0], b[1]); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(a[0], a[1]);
+        ctx.lineTo(a[0] + (b[0] - a[0]) * f, a[1] + (b[1] - a[1]) * f);   // each line grows from its start
+        ctx.stroke();
       }
     } else if (t.kind === 'shade') {
       // reveal: the true terminator over the user's marks (contour is drawn
       // separately in redraw so it's visible in every phase)
-      ctx.beginPath();
-      const s0 = this.toPx(t.polyline[0]); ctx.moveTo(s0[0], s0[1]);
-      for (let i = 1; i < t.polyline.length; i++) { const p = this.toPx(t.polyline[i]); ctx.lineTo(p[0], p[1]); }
-      ctx.stroke();
+      this._strokePartial(ctx, px(t.polyline), f, false);
     } else if (t.kind === 'gesture') {
       // head + mass ovals only during STUDY (they make it read as a figure);
       // the line of action is the thing memorised, redrawn and scored
@@ -599,22 +676,21 @@
         (t.masses || []).forEach((m) => drawOval(m[0], m[1], m[2], m[3]));
         ctx.restore();
       }
-      ctx.beginPath();
-      const g0 = this.toPx(t.loa[0]); ctx.moveTo(g0[0], g0[1]);
-      for (let i = 1; i < t.loa.length; i++) { const p = this.toPx(t.loa[i]); ctx.lineTo(p[0], p[1]); }
-      ctx.lineWidth = (lineW || 2.5) + 1; ctx.stroke();
+      ctx.lineWidth = (lineW || 2.5) + 1;
+      this._strokePartial(ctx, px(t.loa), f, false);
     } else if (t.polyline) {            // open curve — stroke, no fill, no close
-      ctx.beginPath();
-      const q0 = this.toPx(t.polyline[0]); ctx.moveTo(q0[0], q0[1]);
-      for (let i = 1; i < t.polyline.length; i++) { const p = this.toPx(t.polyline[i]); ctx.lineTo(p[0], p[1]); }
-      ctx.stroke();
+      this._strokePartial(ctx, px(t.polyline), f, false);
     } else if (t.polygon) {
-      ctx.beginPath();
-      const p0 = this.toPx(t.polygon[0]); ctx.moveTo(p0[0], p0[1]);
-      for (let i = 1; i < t.polygon.length; i++) { const p = this.toPx(t.polygon[i]); ctx.lineTo(p[0], p[1]); }
-      ctx.closePath();
-      if (fill) { ctx.fillStyle = fill; ctx.fill(); }
-      ctx.stroke();
+      if (f < 1) this._strokePartial(ctx, px(t.polygon), f, true);
+      else {
+        const p = px(t.polygon);
+        ctx.beginPath();
+        ctx.moveTo(p[0][0], p[0][1]);
+        for (let i = 1; i < p.length; i++) ctx.lineTo(p[i][0], p[i][1]);
+        ctx.closePath();
+        if (fill) { ctx.fillStyle = fill; ctx.fill(); }
+        ctx.stroke();
+      }
     }
     ctx.restore();
   };
@@ -706,8 +782,9 @@
     const ux = dx / L, uy = dy / L;
     const ext = (this.cssW + this.cssH) * 2;
     ctx.save();
+    // graphite-sepia, same family as the guides — a tool mark, not foreign ink
     // sight-line extensions beyond the grabbed span, dashed and faint
-    ctx.strokeStyle = 'rgba(42,107,138,0.55)'; ctx.lineWidth = 1.5; ctx.setLineDash([9, 6]);
+    ctx.strokeStyle = 'rgba(64,54,42,0.55)'; ctx.lineWidth = 1.5; ctx.setLineDash([9, 6]);
     ctx.beginPath();
     ctx.moveTo(a[0] - ux * ext, a[1] - uy * ext); ctx.lineTo(a[0], a[1]);
     ctx.moveTo(b[0], b[1]); ctx.lineTo(b[0] + ux * ext, b[1] + uy * ext);
@@ -715,9 +792,9 @@
     ctx.setLineDash([]);
     // the string itself — the measured span, solid, with grab handles at the
     // ends (drag the middle to carry it rigidly, an end to re-aim it)
-    ctx.strokeStyle = 'rgba(42,107,138,0.9)'; ctx.lineWidth = 2;
+    ctx.strokeStyle = 'rgba(64,54,42,0.9)'; ctx.lineWidth = 2;
     ctx.beginPath(); ctx.moveTo(a[0], a[1]); ctx.lineTo(b[0], b[1]); ctx.stroke();
-    ctx.fillStyle = 'rgba(42,107,138,1)';
+    ctx.fillStyle = 'rgba(64,54,42,1)';
     for (const p of [a, b]) { ctx.beginPath(); ctx.arc(p[0], p[1], 4, 0, Math.PI * 2); ctx.fill(); }
     // readout: angle from horizontal (folded to ±90°) + length as % of the
     // panel side — panels are 1:1, so the same % means the same true length
@@ -728,8 +805,9 @@
     const mx = (a[0] + b[0]) / 2, my = (a[1] + b[1]) / 2 - 14;
     ctx.font = '600 12px ui-sans-serif, system-ui, -apple-system, sans-serif';
     const tw = ctx.measureText(lab).width + 8;
-    ctx.fillStyle = 'rgba(255,255,255,0.9)'; ctx.fillRect(mx - tw / 2, my - 9, tw, 17);
-    ctx.fillStyle = 'rgba(42,107,138,1)'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    // readout chip in the app's terracotta — the one accent on the sheet
+    ctx.fillStyle = 'rgba(253,251,246,0.92)'; ctx.fillRect(mx - tw / 2, my - 9, tw, 17);
+    ctx.fillStyle = '#b4532a'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
     ctx.fillText(lab, mx, my);
     ctx.restore();
   };
@@ -738,19 +816,20 @@
   // measuring scaffolds an atelier beginner is taught, faded out by level.
   Surface.prototype._drawGuides = function (ctx) {
     const b = this.box, cx = b.x + b.s / 2, cy = b.y + b.s / 2;
+    // one sepia guide ink at two weights: thirds whisper, plumb/horizon speak
     ctx.save();
-    ctx.strokeStyle = 'rgba(0,0,0,0.06)'; ctx.lineWidth = 1;
+    ctx.strokeStyle = 'rgba(60,50,35,0.08)'; ctx.lineWidth = 1;
     for (let i = 1; i < 3; i++) {
       const x = b.x + b.s * i / 3, y = b.y + b.s * i / 3;
       ctx.beginPath(); ctx.moveTo(x, b.y); ctx.lineTo(x, b.y + b.s); ctx.stroke();
       ctx.beginPath(); ctx.moveTo(b.x, y); ctx.lineTo(b.x + b.s, y); ctx.stroke();
     }
-    ctx.strokeStyle = 'rgba(0,0,0,0.13)';
+    ctx.strokeStyle = 'rgba(60,50,35,0.13)';
     ctx.beginPath(); ctx.moveTo(cx, b.y); ctx.lineTo(cx, b.y + b.s); ctx.stroke();
     ctx.beginPath(); ctx.moveTo(b.x, cy); ctx.lineTo(b.x + b.s, cy); ctx.stroke();
     // angle-clock ticks every 15°
     const R = b.s * 0.13;
-    ctx.strokeStyle = 'rgba(0,0,0,0.18)';
+    ctx.strokeStyle = 'rgba(60,50,35,0.13)';
     for (let d = 0; d < 180; d += 15) {
       const a = d * Math.PI / 180, c = Math.cos(a), s = Math.sin(a);
       ctx.beginPath();
@@ -773,7 +852,8 @@
     for (let i = 0; i < list.length; i++) {
       const m = list[i], isUnit = (i === 0);
       const a = this.toPx(m.a), b = this.toPx(m.b), len = this._mlen(m);
-      const color = isUnit ? '#b4532a' : '#2a6b8a';
+      // unit caliper in terracotta, derived spans in graphite-sepia
+      const color = isUnit ? '#b4532a' : 'rgba(64,54,42,0.9)';
       ctx.strokeStyle = color; ctx.fillStyle = color;
       ctx.beginPath(); ctx.moveTo(a[0], a[1]); ctx.lineTo(b[0], b[1]); ctx.stroke();
       const dx = b[0] - a[0], dy = b[1] - a[1], L = Math.hypot(dx, dy) || 1, nx = -dy / L * 6, ny = dx / L * 6;
@@ -782,7 +862,7 @@
       const lab = isUnit ? '1u' : (unit ? '×' + (len / unit).toFixed(2) : '');
       if (lab) {
         const mx = (a[0] + b[0]) / 2, my = (a[1] + b[1]) / 2, tw = ctx.measureText(lab).width + 8;
-        ctx.fillStyle = 'rgba(255,255,255,0.88)'; ctx.fillRect(mx - tw / 2, my - 9, tw, 17);
+        ctx.fillStyle = 'rgba(253,251,246,0.9)'; ctx.fillRect(mx - tw / 2, my - 9, tw, 17);
         ctx.fillStyle = color; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
         ctx.fillText(lab, mx, my);
         ctx.textAlign = 'start'; ctx.textBaseline = 'alphabetic';
@@ -791,32 +871,54 @@
     ctx.restore();
   };
 
+  // one paper sheet: warm-white fill, a whisper of grain, a soft lift shadow and
+  // a hairline edge — the lit sheet on the desk. One pass per drawable box.
+  Surface.prototype._drawSheet = function (ctx, b, dark) {
+    ctx.save();
+    ctx.shadowColor = dark ? 'rgba(0,0,0,0.55)' : 'rgba(40,34,24,0.14)';
+    ctx.shadowBlur = dark ? 26 : 16;
+    ctx.shadowOffsetY = 4;
+    ctx.fillStyle = '#fdfbf6';
+    ctx.fillRect(b.x, b.y, b.s, b.s);
+    ctx.restore();
+    ctx.save();
+    if (!this._grainPat) this._grainPat = grainPattern(ctx);
+    ctx.globalAlpha = 0.025;
+    ctx.fillStyle = this._grainPat;
+    ctx.fillRect(b.x, b.y, b.s, b.s);
+    ctx.restore();
+    ctx.save();
+    ctx.strokeStyle = 'rgba(60,50,35,0.14)'; ctx.lineWidth = 1;
+    ctx.strokeRect(b.x + 0.5, b.y + 0.5, b.s - 1, b.s - 1);
+    ctx.restore();
+  };
+
   Surface.prototype.redraw = function () {
     const ctx = this.ctx;
+    const dark = isDark();
+    // the surround is the quiet room: a desk tone in daylight, a dark stage in
+    // the evening — only the sheet itself stays lit paper. Stepping back dims
+    // the room further so the sheet reads from "across the studio".
+    const desk = dark ? (this.stepBack ? '#15120e' : '#211d18')
+                      : (this.stepBack ? '#d5cebf' : '#eee9dd');
     ctx.save();
-    // raw clear first: when stepped back (zoomed out) the paper floats on a
-    // desk-toned surround, so the whole viewport must be painted
+    // raw clear first: pinch-zoom / step-back can expose the area outside the
+    // view transform, so the whole viewport must be painted
     const r0 = this._rect || this.canvas.getBoundingClientRect();
     ctx.setTransform(this.canvas.width / (r0.width || 1), 0, 0, this.canvas.height / (r0.height || 1), 0, 0);
-    ctx.fillStyle = this.stepBack ? '#dcd6c9' : '#ffffff';
+    ctx.fillStyle = desk;
     ctx.fillRect(0, 0, this.cssW, this.cssH);
     // transform from the live displayed size (not an assumed dpr) so 1 unit = 1 CSS px
     this._setStrokeTransform(ctx);
-    ctx.fillStyle = '#ffffff';
+    ctx.fillStyle = desk;
     ctx.fillRect(0, 0, this.cssW, this.cssH);
 
-    // study-box frame (subtle)
-    ctx.save();
-    ctx.strokeStyle = 'rgba(0,0,0,0.06)'; ctx.lineWidth = 1;
-    ctx.strokeRect(this.box.x, this.box.y, this.box.s, this.box.s);
-    ctx.restore();
+    // the paper sheet(s)
+    this._drawSheet(ctx, this.box, dark);
 
     // sight-size: the reference panel, always fully visible, same scale
     if (this.sightSize && this.refBox) {
-      ctx.save();
-      ctx.strokeStyle = 'rgba(0,0,0,0.1)'; ctx.lineWidth = 1;
-      ctx.strokeRect(this.refBox.x, this.refBox.y, this.refBox.s, this.refBox.s);
-      ctx.restore();
+      this._drawSheet(ctx, this.refBox, dark);
       if (this.ghost) this._drawGhost(ctx, 1, this.refBox);
       // eye-flick: the reference flashed over the DRAWING panel for a beat
       if (this._flickUntil > performance.now() && this.ghost) this._drawGhost(ctx, 0.45, this.box);
@@ -840,9 +942,10 @@
     this._drawStrokes(ctx);
     if (this._cur) this._drawnIdx = this._cur.pts.length - 1;   // incremental renderer resumes from here
 
-    // REVEAL: target in accent over the marks for visual comparison
+    // REVEAL: target in accent over the marks for visual comparison — it
+    // draws itself in (arc-length tween) the moment the answer lands
     if (this.revealTarget && this.target) {
-      this._drawTargetGeom(ctx, '#c0392b', null, 2);
+      this._drawTargetGeom(ctx, '#c0392b', null, 2, this._revealFrac);
     }
     // eraser cursor
     if (this.erasing && this._erasePt) {

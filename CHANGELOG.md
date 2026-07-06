@@ -19,6 +19,17 @@ No feature reaches `main` without a version bump.
 
 ---
 
+## 1.12.0 — The atelier look
+
+A full visual overhaul against one brief: every drill, both themes, both orientations, should feel like *a lit white sheet in a dark quiet room* (dark) or a warm atelier (light).
+
+- **Dark-mode drill fixed**: the overlay chrome now sits on themed stage bands — no more cream text and invisible buttons over the white canvas.
+- **Paper materiality**: the sheet is warm white with a whisper of grain, a hairline edge and a soft lift off a desk-toned surround that dims with the theme; guide lines unified to one quiet weight.
+- **Toolbar hierarchy**: drill tools are compact icon tiles (monoline SVG, matching the nav) with one full primary CTA; landscape gets a proper 2-column tool rail.
+- **The reveal breathes**: the target *draws itself in* (~400 ms), the score counts up, and the result card opens compact — the comparison stays visible, details expand on "More ▾".
+- **Cohesion**: accent hairline hero instead of the muddy gradient wash; 👤/🔥 emoji replaced with drawn SVG; string/measure overlays in graphite-sepia instead of foreign steel blue; real type scale with eyebrow labels; prose capped at a readable measure.
+- **Daily-use polish**: Exercises page teaching prose folds behind "About this ▸"; empty Stats/History get a quiet easel drawing and a real CTA; 44 pt+ touch targets on estimate boxes, small buttons and streak dots; timer ring hides when idle; reference-picker cells framed with a scroll fade.
+
 ## 1.11.0 — Performance-contingent training
 
 Difficulty, spacing and promotion now respond to how you actually perform, not just the calendar — the highest-leverage cluster from the full training-science audit.

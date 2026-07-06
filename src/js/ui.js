@@ -73,8 +73,26 @@
     pencil: I('<path d="M4 20l1.2-4.2L16.6 4.4a1.7 1.7 0 0 1 2.4 0l.6.6a1.7 1.7 0 0 1 0 2.4L8.2 18.8 4 20z"/><path d="M14.8 6.2l3 3"/>'),
     chart: I('<path d="M4 20h16"/><path d="M7 16v-5"/><path d="M12 16V7"/><path d="M17 16v-8"/>'),
     grid: I('<rect x="4.5" y="4.5" width="6" height="6" rx="1"/><rect x="13.5" y="4.5" width="6" height="6" rx="1"/><rect x="4.5" y="13.5" width="6" height="6" rx="1"/><rect x="13.5" y="13.5" width="6" height="6" rx="1"/>'),
-    dots: I('<circle cx="5.5" cy="12" r="1.4" fill="currentColor" stroke="none"/><circle cx="12" cy="12" r="1.4" fill="currentColor" stroke="none"/><circle cx="18.5" cy="12" r="1.4" fill="currentColor" stroke="none"/>')
+    dots: I('<circle cx="5.5" cy="12" r="1.4" fill="currentColor" stroke="none"/><circle cx="12" cy="12" r="1.4" fill="currentColor" stroke="none"/><circle cx="18.5" cy="12" r="1.4" fill="currentColor" stroke="none"/>'),
+    user: I('<circle cx="12" cy="8.2" r="3.4"/><path d="M5.4 19.6c1.2-3.4 3.7-5.1 6.6-5.1s5.4 1.7 6.6 5.1"/>'),
+    flame: I('<path d="M12 3.5c.6 2.8-1.7 4.4-3 6.4a6.4 6.4 0 1 0 10.4 1.4C17.6 8.1 13.2 7.2 12 3.5z"/><path d="M12 20.5a3.1 3.1 0 0 1-2.3-5.2c.8-.9 1.7-1.6 2.1-2.9.6 1.3 1.4 2 2.2 2.9a3.1 3.1 0 0 1-2 5.2z"/>'),
+    // drill toolbox (compact icon tiles)
+    eye: I('<path d="M3.5 12S6.8 6.8 12 6.8 20.5 12 20.5 12 17.2 17.2 12 17.2 3.5 12 3.5 12z"/><circle cx="12" cy="12" r="2.4"/>'),
+    ruler: I('<rect x="2.8" y="8.8" width="18.4" height="6.4" rx="1.2"/><path d="M7.2 8.8v2.6"/><path d="M12 8.8v3.8"/><path d="M16.8 8.8v2.6"/>'),
+    guides: I('<rect x="4" y="4" width="16" height="16" rx="1.5"/><path d="M12 4v16"/><path d="M4 12h16"/>'),
+    flip: I('<path d="M19.5 12A7.5 7.5 0 1 1 17 6.4"/><path d="M17.6 2.8V6.6h-3.8"/>'),
+    undo: I('<path d="M8.6 6.4 4.4 10.6l4.2 4.2"/><path d="M4.6 10.6H14.6a4.6 4.6 0 0 1 0 9.2h-2.8"/>'),
+    erase: I('<path d="M9.6 19.4 4.1 13.9a1.6 1.6 0 0 1 0-2.3L12.8 3a1.6 1.6 0 0 1 2.3 0l4.9 4.9a1.6 1.6 0 0 1 0 2.3l-9.2 9.2z"/><path d="M8.3 7.4l8.3 8.3"/><path d="M9.6 19.4H20"/>'),
+    trash: I('<path d="M5 7h14"/><path d="M9.6 7V5.2a1 1 0 0 1 1-1h2.8a1 1 0 0 1 1 1V7"/><path d="M7 7l1 12.3a1.5 1.5 0 0 0 1.5 1.4h5a1.5 1.5 0 0 0 1.5-1.4L17 7"/>'),
+    string: I('<circle cx="5.2" cy="18.8" r="1.7"/><circle cx="18.8" cy="5.2" r="1.7"/><path d="M6.5 17.5 17.5 6.5"/>'),
+    stepback: I('<circle cx="10.8" cy="10.8" r="6.3"/><path d="M8.2 10.8h5.2"/><path d="M15.4 15.4 20.5 20.5"/>'),
+    flick: I('<path d="M13 2.8 5.4 13.4h5.2L9.6 21.2 17.6 10.4h-5.2L13 2.8z"/>'),
+    refresh: I('<path d="M5 12a7 7 0 0 1 12.1-4.8"/><path d="M17.4 3.4v3.9h-3.9"/><path d="M19 12a7 7 0 0 1-12.1 4.8"/><path d="M6.6 20.6v-3.9h3.9"/>')
   };
+  // compact icon tool button: monoline glyph + a tiny caption. The single .btn
+  // CTA keeps its full size, so the eye lands on the primary action first.
+  const T = (act, icon, label, o) =>
+    `<button class="tbtn${o && o.sel ? ' sel' : ''}" data-act="${act}" aria-label="${esc(label)}"${o && o.dis ? ' disabled' : ''}>${icon}<span class="tl">${esc((o && o.short) || label)}</span></button>`;
 
   ui.go = function (view) {
     ui.view = view;
@@ -110,12 +128,24 @@
     return { step: r.step, exKey: r.exKey || '', title: r.title, sub: r.sub, btn: btns[r.step] || 'Practice' };
   }
   // slim one-line recommendation — used at the top of the Exercises menu
-  // (Home surfaces the same engine as the Today's-plan checklist)
-  function recLine(all) {
+  // (Home surfaces the same engine as the Today's-plan checklist). The optional
+  // note replaces what used to be a separate .banner element below it.
+  function recLine(all, note) {
     const a = recAction(all);
     return `<div class="card rec slim"><div class="row between center">
       <div class="small"><span class="rec-tag">RECOMMENDED</span> <b>${esc(a.title)}</b><div class="tiny muted">${esc(a.sub)}</div></div>
-      <button class="btn soft sm" data-rec="${a.step}" data-recex="${esc(a.exKey)}">${a.btn} ›</button></div></div>`;
+      <button class="btn soft sm" data-rec="${a.step}" data-recex="${esc(a.exKey)}">${a.btn} ›</button></div>
+      ${note ? `<div class="tiny muted" style="margin-top:7px">${note}</div>` : ''}</div>`;
+  }
+  // long "when / why" prose collapsed behind a quiet toggle — the drill lists
+  // stay first-class; the pedagogy is one tap away (see v.onclick handlers)
+  const aboutRow = (html) => `<button class="aboutbtn" data-about="1">About this <span class="achev" aria-hidden="true">▸</span></button>
+    <div class="aboutrow" hidden><p class="small muted" style="margin:6px 0 0">${html}</p></div>`;
+  function toggleAbout(btn) {
+    const row = btn.nextElementSibling; if (!row) return;
+    const open = row.hasAttribute('hidden');
+    if (open) row.removeAttribute('hidden'); else row.setAttribute('hidden', '');
+    btn.classList.toggle('open', open);
   }
   function doRec(step, exKey) {
     if (step === 'warmup') startWarmup();
@@ -180,7 +210,7 @@
     const b = $('#profilebtn'); if (!b) return;
     let n = A.store.profileName() || 'Player 1';
     if (n.length > 12) n = n.slice(0, 11) + '…';
-    b.textContent = '👤 ' + n;
+    b.innerHTML = ICONS.user + esc(n);   // drawn glyph, not emoji — matches the icon set
   }
   function switchProfile(pid) {
     A.store.setProfile(pid);
@@ -210,6 +240,20 @@
     };
     sheet.addEventListener('pointerup', act);
     sheet.addEventListener('click', act);
+  }
+
+  /* ---- empty states -------------------------------------------------------
+     a bare sentence reads as broken; a faint studio easel + one serif line +
+     the obvious next step keeps the room quiet but alive */
+  const EASEL_SVG = `<svg viewBox="0 0 64 64" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+    <path d="M32 5v7"/><path d="M28.5 5h7"/>
+    <rect x="15" y="12" width="34" height="26" rx="1"/>
+    <path d="M23 30c2.5-7 8-10.5 17-11.5"/><path d="M25 22.5c4.5.5 8 2.5 10.5 6"/>
+    <path d="M21 38 10 58"/><path d="M43 38l11 20"/><path d="M32 38v20"/>
+    <path d="M15.5 48h33"/></svg>`;
+  function emptyState(sentence) {
+    return `<div class="empty">${EASEL_SVG}<p>${esc(sentence)}</p>
+      <button class="btn" data-go="practice">Do your first drill ›</button></div>`;
   }
 
   function toast(msg) {
@@ -258,7 +302,7 @@
         </svg><div class="num"><b>${plan.doneCount}/${plan.segments.length}</b><span class="tiny muted">plan</span></div></div>
         <div style="flex:1">
           <div class="row between center"><h2>Today’s plan</h2>
-            <div><span class="flame">${streak > 0 ? '🔥' : '·'}</span> <b>${streak}</b> <span class="muted small">day streak${bestStreak > streak ? ` · best ${bestStreak}` : ''}</span></div></div>
+            <div class="streakline"><span class="flame">${streak > 0 ? ICONS.flame : ''}</span> <b>${streak}</b> <span class="muted small">day streak${bestStreak > streak ? ` · best ${bestStreak}` : ''}</span></div></div>
           <div class="tiny muted">${plan.complete ? 'Done for today — anything more is a bonus.' : 'Study → hide → draw from memory. The plan describes the day; any real practice counts.'}</div>
         </div>
       </div>
@@ -382,32 +426,34 @@
             <div class="tiny muted" style="margin-top:3px">${lvl}</div></div>
           <button class="btn soft sm" data-ex="${e.key}">Start ›</button></div>`;
       }).join('');
-      return `<div class="card"><h2>Module ${m.n} · ${esc(m.name)}</h2>${rows}</div>`;
+      return `<div class="card"><div class="eyebrow">Module ${m.n}</div><h2>${esc(m.name)}</h2>${rows}</div>`;
     }).join('');
     const sv = savedSession();
     const lbl = (kind, base) => (sv && sv.kind === kind) ? `Resume · ${sv.completed}/${sv.queue.length}` : base;
     const sessions = `<div class="card"><h2>Guided sessions</h2>
-      <p class="small muted" style="margin:4px 0 10px"><b>When:</b> once you know the basic drills and want a full sitting without picking each exercise yourself. It auto-builds a <i>mix</i> of drills for you — mixing (interleaving) feels harder than repeating one drill, but builds more durable, transferable skill. A few times a week is ideal. Progress saves through the day; <b>New figure</b> swaps in a fresh figure (doesn’t count).</p>
-      <div class="row wrap">
+      <div class="row wrap" style="margin-top:10px">
         <button class="btn" data-session="mixed">${lbl('mixed', `Mixed session · ${SESSIONS.mixed.n} · ~${SESSIONS.mixed.min} min`)}</button>
         <button class="btn ghost" data-session="warmup">${lbl('warmup', `Quick session · ${SESSIONS.warmup.n} · ~${SESSIONS.warmup.min} min`)}</button></div>
-      <div class="tiny muted" style="margin-top:8px">Mixed = a full workout · Quick = a short version when time’s tight.</div></div>
+      <div class="tiny muted" style="margin-top:8px">Mixed = a full workout · Quick = a short version when time’s tight.</div>
+      ${aboutRow('<b>When:</b> once you know the basic drills and want a full sitting without picking each exercise yourself. It auto-builds a <i>mix</i> of drills for you — mixing (interleaving) feels harder than repeating one drill, but builds more durable, transferable skill. A few times a week is ideal. Progress saves through the day; <b>New figure</b> swaps in a fresh figure (doesn’t count).')}</div>
       <div class="card"><h2>Perception warm-up <span class="tag self">2–3 min</span></h2>
-      <p class="small muted" style="margin:4px 0 10px"><b>When:</b> at the <b>start of every session</b> (and again if you come back hours later). No drawing — you just judge to prime your eye, because misperceiving the subject (not the hand) is the main cause of inaccurate drawing. Each judgement levels up on its own.</p>
-      <div class="row wrap">${['angle', 'prop', 'curve', 'value'].map((k) => {
+      <div class="row wrap" style="margin-top:10px">${['angle', 'prop', 'curve', 'value'].map((k) => {
         const pl = A.store.get('percLevel', {});
         const names = { angle: 'Judge angle', prop: 'Judge proportion', curve: 'Judge curve', value: 'Judge value' };
         return `<button class="btn soft" data-perc="${k}">${names[k]} · Lv ${pl[k] || 1}</button>`;
       }).join('')}</div>
-      <p class="small muted" style="margin:12px 0 8px"><b>Discriminate</b> — forced choice: which is steeper / longer? An adaptive staircase finds the smallest difference your eye can catch, then pushes it finer. Watch the threshold fall over weeks.</p>
+      ${aboutRow('<b>When:</b> at the <b>start of every session</b> (and again if you come back hours later). No drawing — you just judge to prime your eye, because misperceiving the subject (not the hand) is the main cause of inaccurate drawing. Each judgement levels up on its own.')}
+      <p class="small" style="margin:12px 0 8px"><b>Discriminate</b> — forced choice: which is steeper / longer?</p>
       <div class="row wrap">${['angle', 'length', 'curve', 'value'].map((k) => {
         const best = A.store.get('afcBest', {})[k];
         const names = { angle: 'Which is steeper?', length: 'Which is longer?', curve: 'Which bows more?', value: 'Which is darker?' };
         const unit = k === 'angle' ? '°' : k === 'value' ? '' : '%';
         return `<button class="btn soft" data-afc="${k}">${names[k]}${best != null ? ` · best ${best}${unit}` : ''}</button>`;
-      }).join('')}</div></div>`;
-    v.innerHTML = `${recLine(all)}<div class="banner">Not sure where to start? Use the <b>recommended</b> step above. Otherwise, pick any single drill or a guided session below.</div>${sessions}${groups}`;
+      }).join('')}</div>
+      ${aboutRow('An adaptive staircase finds the smallest difference your eye can catch, then pushes it finer. Watch the threshold fall over weeks.')}</div>`;
+    v.innerHTML = `${recLine(all, 'Not sure where to start? Take this step — or pick any single drill or a guided session below.')}${sessions}${groups}`;
     v.onclick = (e) => {
+      const ab = e.target.closest('[data-about]'); if (ab) { toggleAbout(ab); return; }
       const rc = e.target.closest('[data-rec]'); if (rc) { doRec(rc.dataset.rec, rc.dataset.recex); return; }
       const s = e.target.closest('[data-session]');
       if (s) { const sv2 = savedSession(); if (sv2 && sv2.kind === s.dataset.session) resumeSession(); else startSession(s.dataset.session); return; }
@@ -507,7 +553,7 @@
     const d = el(`<div id="drill">
       <div class="instructor"><div class="txt" id="d-instr">Study</div>
         <div class="hgroup"><div class="tiny muted" id="d-sess"></div>
-          <div class="ringwrap"><div class="tring" id="d-ring"><svg viewBox="0 0 48 48"><circle class="track" cx="24" cy="24" r="20"></circle><circle class="fill" id="d-ringfill" cx="24" cy="24" r="20"></circle></svg><div class="tringtxt" id="d-timer"></div></div><div class="ringlabel" id="d-ringlabel"></div></div></div></div>
+          <div class="ringwrap" id="d-ringwrap"><div class="tring" id="d-ring"><svg viewBox="0 0 48 48"><circle class="track" cx="24" cy="24" r="20"></circle><circle class="fill" id="d-ringfill" cx="24" cy="24" r="20"></circle></svg><div class="tringtxt" id="d-timer"></div></div><div class="ringlabel" id="d-ringlabel"></div></div></div></div>
       <div class="hint" id="d-hint"></div>
       <button class="closeX" id="d-close" aria-label="Close drill">✕</button>
       <button class="closeX" id="d-help" style="right:58px;font-weight:600" aria-label="How this drill works">?</button>
@@ -808,6 +854,11 @@
   function updateTimer() {
     updateSessClock();
     const t = $('#d-timer'), hint = $('#d-hint'), label = $('#d-ringlabel');
+    const wrap = $('#d-ringwrap');
+    // no time pressure during estimate/reveal — an empty ring reads as broken,
+    // so the whole ring hides until the next timed phase
+    const timed = drill.phase === 'study' || drill.phase === 'hold' || drill.phase === 'draw';
+    if (wrap) wrap.classList.toggle('idle', !timed);
     let lab = '';
     if (drill.phase === 'study') {
       const cap = drill.studyCap || 0;
@@ -849,6 +900,21 @@
 
   function scoreClass(s) { return s >= 85 ? 's-good' : s >= 65 ? 's-mid' : 's-low'; }
 
+  // the score lands as a quick count-up (~500ms) — the number is the payoff of
+  // the loop, and the tick gives it a beat to arrive in
+  function countUpScore(root, score) {
+    const elm = $('#d-scorenum', root); if (!elm || !(score > 0)) return;
+    if (window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+    const t0 = performance.now(), dur = 500;
+    const tick = (t) => {
+      const p = Math.min(1, (t - t0) / dur);
+      elm.textContent = Math.round(score * p * (2 - p));   // ease-out, same curve as the reveal line
+      if (p < 1) requestAnimationFrame(tick);
+    };
+    elm.textContent = '0';
+    requestAnimationFrame(tick);
+  }
+
   function updateDrill() {
     const def = drill.def;
     const instr = $('#d-instr'), timer = $('#d-timer'), controls = $('#d-controls'), result = $('#d-result');
@@ -856,11 +922,11 @@
     // "New figure" = swap in a fresh procedurally-generated figure of the same exercise
     // & level without it counting. Only for scored drills (reference/Bargue use a chosen
     // image, so a "new figure" makes no sense there).
-    const newFig = def.scored ? '<button class="btn ghost sm" data-act="skipdrill">New figure ⟳</button>' : '';
+    const newFig = def.scored ? T('skipdrill', ICONS.refresh, 'New figure', { short: 'New' }) : '';
     // comparative-measurement caliper (Bargue/reference): toggle + clear; a short hint
     const measureBtns = surface.measureMode
-      ? `<button class="btn ghost sm sel" data-act="measure">Measuring</button><button class="btn ghost sm" data-act="clearmeasure">Clear m.</button>`
-      : `<button class="btn ghost sm" data-act="measure">Measure${surface.measures.length ? ' ' + surface.measures.length : ''}</button>`;
+      ? T('measure', ICONS.ruler, 'Measuring', { sel: true }) + T('clearmeasure', ICONS.trash, 'Clear measures', { short: 'Clear m.' })
+      : T('measure', ICONS.ruler, 'Measure', { short: surface.measures.length ? 'Meas ' + surface.measures.length : 'Measure' });
     const measuring = surface.measureMode ? '  ·  drag a line to measure (1st = unit, rest read ×units)' : '';
 
     if (drill.phase === 'study') {
@@ -870,7 +936,7 @@
         : 'It hides when the ring runs out — then draw it from memory.';
       instr.textContent = (drill.isFinisher ? 'Finisher — one level up! ' : '') + `Memorise ${cue}. ${after}` + (!def.scored ? measuring : '');
       timer.textContent = drill.selfPaced ? Math.floor(drill.studyElapsed || 0) + 's' : Math.ceil(drill.studyRemaining) + 's';
-      const flipBtn = !def.scored && drill.ref && drill.ref.img ? `<button class="btn ghost sm" data-act="flip">Flip ⟲</button>` : '';
+      const flipBtn = !def.scored && drill.ref && drill.ref.img ? T('flip', ICONS.flip, 'Flip') : '';
       const commit = drill.selfPaced
         ? `<button class="btn" data-act="skip">I’ve got it ›</button>`
         : `<button class="btn ghost" data-act="skip">Hide & draw now</button>`;
@@ -883,19 +949,23 @@
       controls.innerHTML = '';
     }
     else if (drill.phase === 'draw') {
-      const flipBtn = !def.scored && drill.ref && drill.ref.img ? `<button class="btn ghost sm ${surface.ghostFlip ? 'sel' : ''}" data-act="flip">Flip ⟲</button>` : '';
+      const flipBtn = !def.scored && drill.ref && drill.ref.img ? T('flip', ICONS.flip, 'Flip', { sel: surface.ghostFlip }) : '';
       // glances cost level credit on scored drills — show that on the button so
       // it's a considered choice, not a free peek
-      const glanceCost = def.scored ? ' −5' : '';
-      const glanceBtn = `<button class="btn ghost sm" data-act="glance" ${drill.glancesLeft() <= 0 ? 'disabled' : ''}>Glance${glanceCost}${drill.glanceCap ? ' · ' + drill.glancesLeft() : ''}</button>`;
-      const undoBtn = `<button class="btn ghost sm" data-act="undo" ${surface.canUndo() ? '' : 'disabled'}>Undo</button>`;
-      const eraseBtn = `<button class="btn ghost sm ${surface.erasing ? 'sel' : ''}" data-act="erase">Erase</button>`;
-      const guidesBtn = `<button class="btn ghost sm ${surface.guides ? 'sel' : ''}" data-act="guides">Guides</button>`;
+      // glanced trials are scored + coached but not level evidence (1.11.0)
+      const glanceCost = '';
+      const glanceBtn = T('glance', ICONS.eye, 'Glance at the figure', {
+        dis: drill.glancesLeft() <= 0,
+        short: 'Glance' + glanceCost + (drill.glanceCap ? ' ·' + drill.glancesLeft() : '') });
+      const undoBtn = T('undo', ICONS.undo, 'Undo', { dis: !surface.canUndo() });
+      const eraseBtn = T('erase', ICONS.erase, 'Erase', { sel: surface.erasing });
+      const guidesBtn = T('guides', ICONS.guides, 'Guides', { sel: surface.guides });
+      const clearBtn = T('clear', ICONS.trash, 'Clear all marks', { short: 'Clear' });
       if (drill.exKey === 'sightsize') {     // side-by-side copy: compare, don't memorise
         const scoreBtn = `<button class="btn" data-act="evaluate" ${drill.canEvaluate() ? '' : 'disabled'}>Score ›</button>`;
         if (surface.stepBack) {
           instr.textContent = 'Judging distance — placement and size errors show themselves. Tap the canvas to walk back in.';
-          controls.innerHTML = `<button class="btn ghost sm sel" data-act="stepback">Step back</button>${scoreBtn}`;
+          controls.innerHTML = `${T('stepback', ICONS.stepback, 'Walk back in', { sel: true, short: 'Return' })}${scoreBtn}`;
         } else {
           // step-back rhythm nudge: after a run of marks without judging the whole,
           // steer the eye back — that IS the sight-size discipline
@@ -905,23 +975,21 @@
             : (surface.stringMode
               ? 'Stretch the string along an edge on the plate, then grab its middle to carry it — angle & length held — over your copy. Grab an end to re-aim it; tap empty space to clear.'
               : 'Copy the plate at the same size. Rhythm: mark → flick eyes to the plate → correct.');
-          const stringBtn = `<button class="btn ghost sm ${surface.stringMode ? 'sel' : ''}" data-act="string">String</button>`;
-          controls.innerHTML = `<button class="btn ghost sm" data-act="stepback">Step back</button>
-            <button class="btn ghost sm" data-act="flick">Flick</button>${stringBtn}${measureBtns}${undoBtn}${eraseBtn}
-            <button class="btn ghost sm" data-act="clear">Clear</button>${scoreBtn}`;
+          const stringBtn = T('string', ICONS.string, 'String', { sel: surface.stringMode });
+          controls.innerHTML = `${T('stepback', ICONS.stepback, 'Step back', { short: 'Step' })}${T('flick', ICONS.flick, 'Flick')}${stringBtn}${measureBtns}${undoBtn}${eraseBtn}${clearBtn}${scoreBtn}`;
         }
       }
       else if (!def.scored && drill.stages) {     // guided multi-stage block-in
         const last = drill.stage >= drill.stages.length - 1;
         instr.textContent = `Stage ${drill.stage + 1}/${drill.stages.length} — ${drill.stages[drill.stage]}` + measuring;
-        controls.innerHTML = `${glanceBtn}${measureBtns}${guidesBtn}${flipBtn}${undoBtn}${eraseBtn}<button class="btn ghost sm" data-act="clear">Clear</button>
+        controls.innerHTML = `${glanceBtn}${measureBtns}${guidesBtn}${flipBtn}${undoBtn}${eraseBtn}${clearBtn}
           ${last ? '<button class="btn" data-act="evaluate">Reveal</button>'
                  : '<button class="btn" data-act="nextstage">Next stage ›</button>'}`;
       } else {
         instr.textContent = (drill.isRecall
           ? 'Retention check — draw the figure you studied last time, cold.'
           : 'Hidden — now draw it from memory.') + (!def.scored ? measuring : '');
-        controls.innerHTML = `${glanceBtn}${def.scored || !drill.ref ? (def.scored ? guidesBtn : '') : measureBtns}${flipBtn}${undoBtn}${eraseBtn}<button class="btn ghost sm" data-act="clear">Clear</button>
+        controls.innerHTML = `${glanceBtn}${def.scored || !drill.ref ? (def.scored ? guidesBtn : '') : measureBtns}${flipBtn}${undoBtn}${eraseBtn}${clearBtn}
           ${newFig}<button class="btn" data-act="evaluate" ${drill.canEvaluate() ? '' : 'disabled'}>${def.scored ? 'Evaluate' : 'Reveal'}</button>`;
       }
     }
@@ -1029,10 +1097,24 @@
     // skill, but the learner can always ASK for it (autonomy-supportive feedback)
     const detail = r.showDetail ? metricRows
       : `<div id="d-detail"><button class="btn ghost sm block" data-showdetail="1" style="margin-bottom:6px">Show breakdown</button></div>`;
+    // the card opens COLLAPSED — score, guess-vs-actual and the coach's verdict —
+    // so the drawing it asks you to compare stays visible; "More" unfolds the rest
+    const rest = `${pbMsg}${modeMsg}${glanceMsg}${redrawNudge}${detail}${learnRow}${pendMsg}${lvlMsg}`;
     result.innerHTML = `<div class="card resultcard">
-      <div class="scorebadge ${scoreClass(r.score)}">${r.score}</div>
-      <div class="muted small" style="margin-bottom:8px">${r.recall ? 'retention accuracy' : 'accuracy'}${targetHint}</div>${pbMsg}${tutMsg}${modeMsg}${glanceMsg}${redrawNudge}
-      ${estRow}${detail}${coachRow}${learnRow}${pendMsg}${lvlMsg}</div>`;
+      <div class="scorebadge ${scoreClass(r.score)}" id="d-scorenum">${r.score}</div>
+      <div class="muted small" style="margin-bottom:6px">${r.recall ? 'retention accuracy' : 'accuracy'}${targetHint}</div>
+      ${tutMsg}${estRow}${coachRow}
+      <div class="rc-rest" hidden>${rest}</div>
+      ${rest.trim() ? '<button class="rc-more" data-more="1">More ▾</button>' : ''}</div>`;
+    countUpScore(result, r.score);
+    const moreBtn = $('[data-more]', result);
+    if (moreBtn) moreBtn.onpointerup = (e) => {
+      e.preventDefault();
+      const rc = $('.rc-rest', result);
+      const open = rc.hasAttribute('hidden');
+      if (open) rc.removeAttribute('hidden'); else rc.setAttribute('hidden', '');
+      moreBtn.textContent = open ? 'Less ▴' : 'More ▾';
+    };
     if (!r.showDetail) {
       const slot = $('#d-detail', result);
       if (slot) slot.querySelector('[data-showdetail]').onpointerup = (e) => { e.preventDefault(); slot.innerHTML = metricRows; };
@@ -1093,13 +1175,13 @@
       <div class="ratebtns" id="d-rate">
         ${[1, 2, 3, 4, 5].map((n) => `<button data-rate="${n}">${n}</button>`).join('')}</div>
       <div class="tiny muted" style="margin-top:6px">1 = far off · 5 = very close</div></div>`;
-    const flipBtn = hasImg ? `<button class="btn ghost sm" data-act="flip">Flip ⟲</button>` : '';
+    const flipBtn = hasImg ? T('flip', ICONS.flip, 'Flip', { sel: surface.ghostFlip }) : '';
     const measureBtn = hasImg
       ? (surface.measureMode
-        ? `<button class="btn ghost sm sel" data-act="measure">Measuring</button><button class="btn ghost sm" data-act="clearmeasure">Clear m.</button>`
-        : `<button class="btn ghost sm" data-act="measure">Measure</button>`)
+        ? T('measure', ICONS.ruler, 'Measuring', { sel: true }) + T('clearmeasure', ICONS.trash, 'Clear measures', { short: 'Clear m.' })
+        : T('measure', ICONS.ruler, 'Measure'))
       : '';
-    controls.innerHTML = `${flipBtn}${measureBtn}<button class="btn ghost sm" data-act="clear">Clear</button>`;
+    controls.innerHTML = `${flipBtn}${measureBtn}${T('clear', ICONS.trash, 'Clear all marks', { short: 'Clear' })}`;
   }
 
   // height:width drift vs the plate — a Bargue proportion check at reveal
@@ -1250,7 +1332,11 @@
   let statsCat = 'all';
   async function renderStats(v) {
     const all = await attempts();
-    if (!all.length) { v.innerHTML = `<div class="card"><h2>Statistics</h2><p class="muted small">No drills yet — practise a little and your accuracy trends, calibration bias and study-time curve will appear here.</p></div>`; return; }
+    if (!all.length) {
+      v.innerHTML = emptyState('Draw a few figures and your accuracy trends, calibration and study-time curves will gather here.');
+      v.onclick = (e) => { const g = e.target.closest('[data-go]'); if (g) ui.go(g.dataset.go); };
+      return;
+    }
     const sum = A.stats.summary(all);
     const trend = A.stats.dailyTrend(all, statsCat === 'all' ? null : statsCat);
     const trendTypes = Array.from(new Set(all.filter((a) => a.scored && !PERC_LABELS[a.type]).map((a) => a.type)));
@@ -1340,7 +1426,7 @@
           <div class="k"><div class="v">${sum.meanScore}</div><div class="l">mean accuracy</div></div>
           <div class="k"><div class="v">${sum.total}</div><div class="l">drills</div></div>
           <div class="k"><div class="v">${sum.days}</div><div class="l">days active</div></div>
-          <div class="k"><div class="v">🔥 ${A.habit.streak()}</div><div class="l">streak</div></div>
+          <div class="k"><div class="v flamev">${ICONS.flame}${A.habit.streak()}</div><div class="l">streak</div></div>
         </div></div>
       <div class="card"><h2>Accuracy over time</h2><div class="small muted">daily mean — tap a drill to isolate it</div>
         <div class="chips" style="margin:8px 0 4px">${trendChips}</div>${A.charts.line(trend)}</div>
@@ -1401,7 +1487,11 @@
   let histCat = 'all';
   async function renderHistory(v) {
     const all = (await attempts()).slice().sort((a, b) => b.ts - a.ts);
-    if (!all.length) { v.innerHTML = `<div class="card"><h2>History</h2><p class="muted small">Your saved drills will appear here as a gallery you can replay.</p></div>`; return; }
+    if (!all.length) {
+      v.innerHTML = emptyState('Every drill you finish is kept here — a little gallery of your own strokes, replayable.');
+      v.onclick = (e) => { const g = e.target.closest('[data-go]'); if (g) ui.go(g.dataset.go); };
+      return;
+    }
     // filter chips: only the types that actually have attempts
     const types = Array.from(new Set(all.map((a) => a.type))).filter((t) => !PERC_LABELS[t]);
     const chips = [`<button class="chip ${histCat === 'all' ? 'active' : ''}" data-cat="all">All</button>`]
@@ -1546,7 +1636,7 @@
         return `<div class="mapnode" data-ex="${e.key}"><div class="mn-name">${esc(e.name)} <span class="tag self">self-check</span></div>
           <div class="tiny muted">reference drill</div></div>`;
       }).join('');
-      return `<div class="card"><h2>Module ${m.n} · ${esc(m.name)}</h2><div class="small muted">${esc(m.note)}</div>
+      return `<div class="card"><div class="eyebrow">Module ${m.n}</div><h2>${esc(m.name)}</h2><div class="small muted">${esc(m.note)}</div>
         <div class="mapwrap">${nodes}</div></div>`;
     }).join('');
     const rk = A.game.rank();
@@ -1736,7 +1826,12 @@
     const m = el(`<div class="modal${opts && opts.top ? ' top' : ''}"><div class="sheet">${html}</div></div>`);
     m.addEventListener('click', (e) => { if (e.target === m) closeModal(); });
     document.body.appendChild(m);
-    return $('.sheet', m);
+    const sheet = $('.sheet', m);
+    // bottom scroll fade: signal there's more below the fold; lifts at the end
+    const fade = () => sheet.classList.toggle('scrollfade', sheet.scrollHeight - sheet.scrollTop - sheet.clientHeight > 12);
+    sheet.addEventListener('scroll', fade, { passive: true });
+    setTimeout(fade, 0);
+    return sheet;
   }
   function closeModal() { const m = $('.modal'); if (m) m.remove(); }
 
