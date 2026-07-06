@@ -33,8 +33,9 @@ on every push. `src/tests.html` is the in-browser/on-iPad smoke page.
 
 ## Put it on the iPad (offline, no App Store)
 
-The recommended route is hosting `dist/` (Netlify/GitHub Pages) and "Add to
-Home Screen" from Safari — see **DEPLOY.md** for the 3-minute walkthrough.
+The app is live at **https://boboax.github.io/Atelier-App/** (GitHub Pages,
+auto-deployed from `dist/` on every merge to `main`). Open it in Safari on the
+iPad and "Add to Home Screen" — see **DEPLOY.md** for the walkthrough.
 The single-file `Atelier.html` route also works: open it in Safari from
 Files/Dropbox → Share → **Add to Home Screen** → it runs full-screen and
 offline like a native app.

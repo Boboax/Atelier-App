@@ -19,18 +19,18 @@ pick up the update on their next launch), and regenerates the single-file
 `build.js` ever drift apart. CI (GitHub Actions) runs the unit tests and this
 build on every push.
 
-## Step 1 — Put it online (~1 min)
+## Step 1 — It's already online (GitHub Pages)
 
-**Option A — Netlify Drop (manual):**
-1. Get `dist/` onto your computer (clone the repo, or GitHub → Code → Download ZIP).
-2. Go to **https://app.netlify.com/drop** and drag the **`dist` folder** onto the
-   drop box. Copy the live URL it gives you.
-3. *(Recommended)* Claim the site (free) so future deploys keep the same URL —
-   then updates are just a re-drag onto the site's **Deploys** tab.
+The live app is **https://boboax.github.io/Atelier-App/**
 
-**Option B — connect the repo to Netlify (no dragging, ever):**
-Add new site → Import from GitHub → pick the repo. Build command: **empty**,
-publish directory: **`dist`**. Every push then deploys automatically.
+Deploys are fully automatic: `.github/workflows/deploy-pages.yml` publishes
+`dist/` to GitHub Pages on every push to `main`. There is nothing to drag,
+click or configure — merge to `main` and the site updates within a minute or
+two (watch the **Actions** tab if you want confirmation).
+
+Requirements (already set up, noted here in case they're ever reset):
+- The repo is **public** (Pages is free for public repos).
+- Repo **Settings → Pages → Source** is set to **GitHub Actions**.
 
 ## Step 2 — Install on the iPad (~1 min, on Wi-Fi)
 1. Open **Safari** on the iPad and go to the URL.
@@ -49,8 +49,8 @@ brings it back if iOS ever clears the app's storage or you reinstall. (The app
 also asks iOS to persist its storage, but a backup is the only guarantee.)
 
 ## Updating later
-Edit `src/` → `node build/build.js` → commit & push → redeploy `dist/` (drag, or
-automatic with Option B). Open the home-screen icon once on Wi-Fi; the new
+Edit `src/` → `node build/build.js` → commit & merge to `main` → GitHub Pages
+redeploys automatically. Open the home-screen icon once on Wi-Fi; the new
 service-worker cache name makes it self-update within a few seconds.
 
 ## Alternative: the single file
