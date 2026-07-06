@@ -105,6 +105,79 @@ test('rank: floor is Novice, Master reachable, progress clamped', () => {
   assert.ok(r.progress >= 0 && r.progress <= 1);
 });
 
+test('biasReport: a consistent lean over 6+ genuine lines is actionable', () => {
+  const { A } = freshEnv(LOGIC);
+  const atts = [];
+  for (let i = 0; i < 8; i++) atts.push(att({ metrics: { angleErrDeg: 3.5, lengthErrPct: 1 } }));
+  const b = A.game.biasReport(atts);
+  assert.ok(b, 'actionable bias found');
+  assert.equal(b.kind, 'angle');
+  assert.equal(b.exKey, 'line');
+  assert.equal(b.sign, 1);
+  assert.equal(b.n, 8);
+  assert.ok(/clockwise/.test(b.label));
+});
+
+test('biasReport: cancelling scatter, thin data and sub-threshold means are NOT actionable', () => {
+  const { A } = freshEnv(LOGIC);
+  // alternating lean averages to ~0 — noise, not a habit
+  const scatter = [];
+  for (let i = 0; i < 10; i++) scatter.push(att({ metrics: { angleErrDeg: i % 2 ? 6 : -6, lengthErrPct: 0 } }));
+  assert.equal(A.game.biasReport(scatter), null, 'scatter must not prescribe a correction');
+  // strong but only 5 samples — below the n >= 6 evidence bar
+  const thin = [];
+  for (let i = 0; i < 5; i++) thin.push(att({ metrics: { angleErrDeg: 8 } }));
+  assert.equal(A.game.biasReport(thin), null, 'five samples are not evidence');
+  // consistent but small (1.5° < 2.5°) — within normal accuracy
+  const small = [];
+  for (let i = 0; i < 10; i++) small.push(att({ metrics: { angleErrDeg: 1.5 } }));
+  assert.equal(A.game.biasReport(small), null, 'sub-threshold bias is left alone');
+});
+
+test('biasReport: repeats, recalls and finishers are excluded; a fixed lean ages out of the window', () => {
+  const { A } = freshEnv(LOGIC);
+  const tainted = [];
+  for (let i = 0; i < 4; i++) tainted.push(att({ repeat: true, metrics: { angleErrDeg: 10 } }));
+  for (let i = 0; i < 4; i++) tainted.push(att({ recall: true, metrics: { angleErrDeg: 10 } }));
+  for (let i = 0; i < 4; i++) tainted.push(att({ finisher: true, metrics: { angleErrDeg: 10 } }));
+  assert.equal(A.game.biasReport(tainted), null, 'non-genuine trials must not diagnose');
+  // 10 old strongly-biased + 10 recent clean → the last-10 window sees only clean
+  const healed = [];
+  for (let i = 0; i < 10; i++) healed.push(att({ metrics: { angleErrDeg: 8 } }));
+  for (let i = 0; i < 10; i++) healed.push(att({ metrics: { angleErrDeg: 0 } }));
+  assert.equal(A.game.biasReport(healed), null, 'a corrected lean stops prescribing counter-drills');
+});
+
+test('biasReport: the strongest bias relative to its threshold wins, aimed at its source drill', () => {
+  const { A } = freshEnv(LOGIC);
+  const atts = [];
+  for (let i = 0; i < 8; i++) atts.push(att({ metrics: { angleErrDeg: 3, lengthErrPct: 0 } }));      // 3/2.5 = 1.2×
+  for (let i = 0; i < 8; i++) atts.push(att({ type: 'polygon', metrics: { aspectErrPct: 15 } }));    // 15/6 = 2.5×
+  const b = A.game.biasReport(atts);
+  assert.equal(b.kind, 'aspect');
+  assert.equal(b.exKey, 'polygon');
+  assert.ok(/wide/.test(b.label));
+});
+
+test('recommend: an actionable bias yields a correction step once warm, nothing due and foundations solid', () => {
+  const { A } = freshEnv(LOGIC);
+  // all scored drills at level 3 with fresh long-interval schedules → the
+  // warmup/recall/foundations/due rungs all pass through
+  const curr = {};
+  A.curr.EXERCISES.filter((e) => e.scored).forEach((e) => { curr[e.key] = { level: 3, window: [], sched: { box: 6, last: dayKey(0) } }; });
+  A.store.set('curriculum', curr);
+  const atts = [percAtt()];
+  for (let i = 0; i < 8; i++) atts.push(att({ metrics: { angleErrDeg: 4, lengthErrPct: 0 } }));
+  const r = A.game.recommend(atts);
+  assert.equal(r.step, 'correction');
+  assert.equal(r.exKey, 'line');
+  assert.ok(/lean/.test(r.sub), 'sub explains the measured bias');
+  // without the bias, the same state falls through to the Module 4 ladder
+  const clean = [percAtt()];
+  for (let i = 0; i < 8; i++) clean.push(att({ metrics: { angleErrDeg: 0, lengthErrPct: 0 } }));
+  assert.equal(A.game.recommend(clean).step, 'reference');
+});
+
 test('weakestDrill: needs 3+ genuine attempts, picks the lowest recent mean', () => {
   const { A } = freshEnv(LOGIC);
   const atts = [];

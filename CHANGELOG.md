@@ -19,6 +19,13 @@ No feature reaches `main` without a version bump.
 
 ---
 
+## 1.13.0 — Correction sets & the Module 4 ladder
+
+Two more items from the training-science audit, both about the same principle: practice should be *designed around measured performance*, not served generically.
+
+- **Error-specific correction sets** — the app has always recorded *signed* error metrics (a +3° clockwise lean, lines run 8% long, shapes squashed 10% wide) but only ever displayed them. Now they design practice: when the last ~10 genuine attempts show a consistent bias (≥2.5° angle, ≥6% length or aspect, over 6+ figures — a habit, not scatter), the recommendation engine offers a **Correction set**: 5 figures of the drill that produced the evidence, generated to concentrate targets where the error lives (leans get the full compass *including* the near-vertical/near-horizontal plumb references the usual generator avoids; overshooters get short lines, undershooters long; a habitual squash gets elongated forms where proportion can't hide behind near-square). This is the core of deliberate practice (Ericsson): tasks built around the individual's diagnosed weakness. It slots *below* due reviews (decay first) and *above* new material, runs blocked on purpose (remedial part-practice of one fault), and the finish card closes the loop — your measured bias before vs. this set's mean signed error.
+- **The Module 4 ladder** — reference drills (contour, negative space, Bargue block-in, value study, master copy) were a *designed plateau*: the same study clock forever, which is exactly Ericsson's "arrested development" — improvement stops once a task feels adequate and automatic. They now carry 3 levels; five completions averaging ≥80 (self-rating or objective score) promote, and the only honest dial a self-checked drill has — the encoding glance — tightens to ×0.7 then ×0.5 of the base seconds. No regression (a weak reference copy is information, not decay), and sight-size stays flat: it has no study clock by design. The practice menu shows each drill's rung.
+
 ## 1.12.0 — The atelier look
 
 A full visual overhaul against one brief: every drill, both themes, both orientations, should feel like *a lit white sheet in a dark quiet room* (dark) or a warm atelier (light).

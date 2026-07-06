@@ -80,13 +80,29 @@
   };
 
   /* ---- single line: length + angle ---------------------------------------*/
-  gen.line = function (level) {
+  gen.line = function (level, stress) {
     let ang;
-    if (level <= 2) ang = rnd(0, 180);
+    if (stress && stress.kind === 'angle') {
+      // CORRECTION SET (angle): a systematic lean is best confronted where the
+      // eye has its strongest internal references — near-vertical/-horizontal
+      // (the plumb and level every sighting method checks against) and the
+      // diagonals where a few degrees of drift accumulate unnoticed. So the
+      // usual "avoid easy cardinals" rule is deliberately inverted: sample all
+      // four orientation families with a ±18° spread, cardinals included.
+      // stress.sign (the lean's direction) is carried through untouched for a
+      // future per-orientation refinement; the honest version fixes the
+      // orientation SPREAD, not the target's position or difficulty.
+      ang = pick([0, 45, 90, 135]) + rnd(-18, 18);
+    } else if (level <= 2) ang = rnd(0, 180);
     else {                                  // avoid easy near-cardinal/45° lines
       do { ang = rnd(0, 180); } while ([0, 45, 90, 135, 180].some((c) => Math.abs(ang - c) < 8));
     }
-    const len = rnd(0.35, 0.8) * (level <= 2 ? 0.9 : 1);
+    let len = rnd(0.35, 0.8) * (level <= 2 ? 0.9 : 1);
+    // CORRECTION SET (length): serve targets in the band where the signed
+    // error hurts most — chronic overshooters get SHORT lines (a habitual
+    // absolute overshoot is a large % miss there), undershooters LONG ones
+    // (running out of reach is where lines get cut short).
+    if (stress && stress.kind === 'length') len = stress.sign > 0 ? rnd(0.25, 0.45) : rnd(0.6, 0.8);
     const a = ang * Math.PI / 180;
     const cx = rnd(0.42, 0.58), cy = rnd(0.42, 0.58);
     const dx = Math.cos(a) * len / 2, dy = Math.sin(a) * len / 2;
@@ -94,14 +110,23 @@
   };
 
   /* ---- angle relationships: 2–3 lines from a shared vertex ---------------*/
-  gen.angles = function (level) {
+  gen.angles = function (level, stress) {
     const n = level <= 2 ? 2 : 3;
     const ox = rnd(0.35, 0.65), oy = rnd(0.55, 0.75);
     const lines = [];
     let base = rnd(-160, -110);
+    // CORRECTION SET (angle): anchor one arm near a cardinal so the habitual
+    // lean is judged against a built-in plumb/level reference — the drift in
+    // the OTHER arms then has something honest to be measured from.
+    if (stress && stress.kind === 'angle') base = pick([-180, -90]) + rnd(-8, 8);
+    // CORRECTION SET (length): widen the length contrast between arms — the
+    // relative-length metric is where the bias lives, and near-equal arms
+    // let a habitual over/undershoot hide.
+    const lenLo = (stress && stress.kind === 'length') ? 0.22 : 0.3;
+    const lenHi = (stress && stress.kind === 'length') ? 0.66 : 0.6;
     for (let i = 0; i < n; i++) {
       const a = (base + i * rnd(35, 70)) * Math.PI / 180;
-      const len = rnd(0.3, 0.6);
+      const len = rnd(lenLo, lenHi);
       lines.push([[ox, oy], [ox + Math.cos(a) * len, oy + Math.sin(a) * len]]);
     }
     // re-centre the bundle
@@ -113,7 +138,7 @@
   };
 
   /* ---- polygons: triangles → asymmetric n-gons ---------------------------*/
-  gen.polygon = function (level) {
+  gen.polygon = function (level, stress) {
     // Level 1 = triangles only (simplest start). From level 2 a mix appears and the
     // ceiling rises gradually: L2 tri/quad, L3 quad/pentagon … up to heptagons.
     const lo = Math.max(3, Math.min(7, 3 + Math.floor((level - 1) / 2)));
@@ -132,6 +157,15 @@
     let poly = pts;
     if (level <= 2) poly = A.geom.convexHull(pts);
     if (poly.length < 3) poly = pts;          // collinear hull — fall back to the raw ring
+    // CORRECTION SET (aspect): elongate the target along the axis the learner
+    // distorts (drawn-too-wide → wide targets, too-tall → tall). Proportion
+    // judgement degrades as aspect ratios leave 1:1 — near-square forms let a
+    // habitual squash/stretch hide, elongated ones force an explicit
+    // width-vs-height comparison. fitToBox preserves aspect, so this sticks.
+    if (stress && stress.kind === 'aspect') {
+      const k = rnd(1.35, 1.7);
+      poly = poly.map((p) => stress.sign > 0 ? [0.5 + (p[0] - 0.5) * k, p[1]] : [p[0], 0.5 + (p[1] - 0.5) * k]);
+    }
     return { kind: 'polygon', polygon: fitToBox(poly, 0.13) };
   };
 
@@ -191,15 +225,21 @@
     p = chaikin(p, 2);                              // round the facets
     return fitToBox(p, 0.12);
   }
-  gen.envelope = function (level) {
+  gen.envelope = function (level, stress) {
+    const stressAspect = stress && stress.kind === 'aspect';
     // ~half the time, draw a recognisable real-subject outline (eligible by level);
     // otherwise an abstract organic form. Mix keeps infinite variety + real subjects.
+    // A correction set skips silhouettes: they carry their own fixed aspect,
+    // and the set needs control of it.
     const names = Object.keys(SIL).filter((n) => SIL[n].minL <= level);
-    if (names.length && Math.random() < 0.5) {
+    if (!stressAspect && names.length && Math.random() < 0.5) {
       return { kind: 'envelope', polygon: placeSilhouette(SIL[names[Math.floor(Math.random() * names.length)]].pts) };
     }
     const cx = 0.5, cy = 0.5, baseR = 0.34;
-    const aspect = rnd(0.62, 1.55);               // elongation — forms aren't circles
+    // CORRECTION SET (aspect): pin the elongation into the learner's biased
+    // direction (see gen.polygon — aspect here scales y, so <1 reads WIDE)
+    const aspect = stressAspect ? (stress.sign > 0 ? rnd(0.55, 0.75) : rnd(1.35, 1.6))
+                                : rnd(0.62, 1.55);  // elongation — forms aren't circles
     const rot = rnd(0, Math.PI * 2);
     // A k=1 "taper" term is the key: r = 1 + e·cos θ makes a wide end and a narrow end —
     // i.e. an EGG / PEAR / TEARDROP (a recognisable organic form), not a symmetric blob.
@@ -308,17 +348,21 @@
              form: { type, cx, cy, rx, ry, rot }, light: { x: u[0], y: u[1], k } };
   };
 
-  // Dispatch by exercise key.
-  gen.make = function (exKey, level) {
+  // Dispatch by exercise key. The optional stress ({kind:'angle'|'length'|
+  // 'aspect', sign:±1}) comes from a correction set (gamify.biasReport):
+  // deliberate practice targets the measured weakness, so the generators bias
+  // targets into the error zone instead of sampling uniformly. Omitted (all
+  // pre-existing 2-arg calls) → behaviour is unchanged.
+  gen.make = function (exKey, level, stress) {
     switch (exKey) {
-      case 'line': return gen.line(level);
+      case 'line': return gen.line(level, stress);
       case 'curve': return gen.curve(level);
-      case 'angles': return gen.angles(level);
-      case 'polygon': return gen.polygon(level);
-      case 'envelope': return gen.envelope(level);
+      case 'angles': return gen.angles(level, stress);
+      case 'polygon': return gen.polygon(level, stress);
+      case 'envelope': return gen.envelope(level, stress);
       case 'gesture': return gen.gesture(level);
       case 'shade': return gen.shade(level);
-      default: return gen.line(level);
+      default: return gen.line(level, stress);
     }
   };
 
