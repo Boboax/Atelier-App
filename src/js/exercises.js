@@ -192,7 +192,8 @@
   // practice (Lecoq) pushed this delay out to a full day; here it scales with
   // level. Skipped for beginners so early success stays encouraging.
   Drill.prototype._holdSeconds = function () {
-    if (!this.def.scored || this.level < 4) return 0;
+    if (!this.def.scored || this.level < 2) return 0;    // level 1 stays frictionless
+    if (this.level < 4) return 1.5;                      // beyond iconic persistence (Sperling)
     return Math.min(12, 3 + (this.level - 4) * 2);       // L4: 3s → L9: 12s (capped)
   };
 
@@ -276,6 +277,12 @@
     setTimeout(() => {
       this.surface.showTarget = false; this.surface.ghostStudy = false;
       this.surface.setGhost(null); this.surface.redraw();
+      // brief re-encode hold after a manual glance — draw from the refreshed
+      // memory, not the fading trace
+      if (manual !== false && this.def.scored) {
+        this.surface.locked = true;
+        setTimeout(() => { if (this.phase === 'draw') { this.surface.locked = false; } }, 900);
+      }
     }, ms || 600);
   };
 
@@ -374,9 +381,8 @@
     // Manual glances cost level credit: the score stands, but each peek shaves
     // the value the promotion window sees (memory training isn't defeated quietly).
     let adv = { changed: false, level: this.level };
-    if (!this.isRepeat && !this.isRecall && !this.isFinisher) {
-      const credit = Math.max(0, r.score - 5 * (this.glanceCount || 0));
-      adv = A.curr.recordScore(this.exKey, credit, dayKey());
+    if (!this.isRepeat && !this.isRecall && !this.isFinisher && !(this.glanceCount > 0)) {
+      adv = A.curr.recordScore(this.exKey, r.score, dayKey());
       this.level = adv.level;
     }
     this.result = { score: r.score, selfRated: false, metrics: r.metrics,
@@ -430,6 +436,7 @@
       refId: this.ref ? this.ref.id : null, refTitle: this.ref ? this.ref.title : null
     };
     A.store.addAttempt(att);
+    if (this.isRecall && this.def.scored) A.curr.noteRecall(this.exKey, score, att.day);
     A.habit.touch((this.studySec || 0) + (this.drawSec || 0));
     if (!this.def.scored && !this.isRepeat) A.curr.touchRef(this.exKey, att.day);   // spaced review for plates
     if (this.exKey === 'bargue' && att.refId) A.game.notePlate(att.refId, score);   // plate-course best

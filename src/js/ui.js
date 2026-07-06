@@ -21,7 +21,8 @@
   const SESSIONS = { warmup: { n: 6, min: 5 }, mixed: { n: 12, min: 15 } };
   const PERC_LABELS = { 'perc-angle': 'Perceive: Angle', 'perc-prop': 'Perceive: Proportion',
     'perc-curve': 'Perceive: Curve', 'perc-value': 'Perceive: Value',
-    'afc-angle': 'Discriminate: Angle', 'afc-length': 'Discriminate: Length' };
+    'afc-angle': 'Discriminate: Angle', 'afc-length': 'Discriminate: Length',
+    'afc-curve': 'Discriminate: Curve', 'afc-value': 'Discriminate: Value' };
   const exName = (type) => { const d = A.curr.def(type); return d ? d.name : (PERC_LABELS[type] || type); };
   const LOOKCUE = {
     line: 'its slant & length', angles: 'the angles between & the relative lengths',
@@ -145,11 +146,18 @@
   async function startRecall() {
     const all = await attempts();
     const today = A.habit.today();
-    const pool = all.filter((a) => a.scored && !a.repeat && !a.recall && a.day && a.day < today && a.target);
-    if (!pool.length) { toast('No previous figures to recall yet — practise today, test tomorrow.'); return; }
-    const days = Array.from(new Set(pool.map((a) => a.day))).sort().reverse().slice(0, 7);
-    const day = days[Math.floor(Math.random() * Math.min(3, days.length))];   // mostly yesterday-ish
-    const cand = pool.filter((a) => a.day === day);
+    // only composite figures: a single line or angle-pair has no episodic
+    // content to hold across a night — cross-day recall is meaningful for
+    // polygons, envelopes, gestures and shadow shapes (def.recallable)
+    const pool = all.filter((a) => a.scored && !a.repeat && !a.recall && a.day && a.day < today && a.target
+      && A.curr.def(a.type) && A.curr.def(a.type).recallable);
+    if (!pool.length) { toast('No previous figures to recall yet — practise shapes today, test tomorrow.'); return; }
+    // expanding retrieval: aim each drill at its own lag (1→3→7→14 days,
+    // growing on success, resetting on failure — Landauer & Bjork)
+    const age = (k) => { const p = (d) => { const x = d.split('-'); return Date.UTC(+x[0], +x[1] - 1, +x[2]); }; return Math.round((p(today) - p(k)) / 864e5); };
+    const scored = pool.map((a) => ({ a, gap: Math.abs(age(a.day) - A.curr.recallLag(a.type)) }));
+    const best = Math.min.apply(null, scored.map((x) => x.gap));
+    const cand = scored.filter((x) => x.gap <= best + 1).map((x) => x.a);
     const att = cand[Math.floor(Math.random() * cand.length)];
     run = null; session = null;
     const d = $('#drill'); d.classList.add('on');
@@ -392,10 +400,10 @@
         return `<button class="btn soft" data-perc="${k}">${names[k]} · Lv ${pl[k] || 1}</button>`;
       }).join('')}</div>
       <p class="small muted" style="margin:12px 0 8px"><b>Discriminate</b> — forced choice: which is steeper / longer? An adaptive staircase finds the smallest difference your eye can catch, then pushes it finer. Watch the threshold fall over weeks.</p>
-      <div class="row wrap">${['angle', 'length'].map((k) => {
+      <div class="row wrap">${['angle', 'length', 'curve', 'value'].map((k) => {
         const best = A.store.get('afcBest', {})[k];
-        const names = { angle: 'Which is steeper?', length: 'Which is longer?' };
-        const unit = k === 'angle' ? '°' : '%';
+        const names = { angle: 'Which is steeper?', length: 'Which is longer?', curve: 'Which bows more?', value: 'Which is darker?' };
+        const unit = k === 'angle' ? '°' : k === 'value' ? '' : '%';
         return `<button class="btn soft" data-afc="${k}">${names[k]}${best != null ? ` · best ${best}${unit}` : ''}</button>`;
       }).join('')}</div></div>`;
     v.innerHTML = `${recLine(all)}<div class="banner">Not sure where to start? Use the <b>recommended</b> step above. Otherwise, pick any single drill or a guided session below.</div>${sessions}${groups}`;
@@ -412,9 +420,26 @@
   async function startExercise(exKey) {
     const def = A.curr.def(exKey);
     if (def.scored) {
-      // a standalone scored exercise runs as a SET of figures so it has a clear finish
-      run = { exKey, size: RUN_SIZE, done: 0, results: [], start: performance.now() };
-      openDrill(exKey, null); return;
+      // a standalone scored exercise runs as a SET of figures so it has a clear
+      // finish. Once the drill is established (level >= 3), the set interleaves
+      // 2 figures from due/weak drills — contextual interference: blocked feels
+      // better, interleaved retains better (Shea & Morgan; Brady meta-analysis).
+      let queue = null;
+      if (A.curr.level(exKey) >= 3) {
+        const all = await attempts();
+        const today = A.habit.today();
+        const others = A.curr.dueDrills(today).map((d) => d.key).filter((k) => k !== exKey);
+        const w = A.game.weakestDrill(all);
+        if (w && w.exKey && w.exKey !== exKey && others.indexOf(w.exKey) < 0) others.push(w.exKey);
+        const extras = others.slice(0, 2);
+        if (extras.length) {
+          const rest = [exKey, exKey].concat(extras).concat(extras.length < 2 ? [exKey] : []);
+          for (let i = rest.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); const t = rest[i]; rest[i] = rest[j]; rest[j] = t; }
+          queue = [exKey].concat(rest).slice(0, RUN_SIZE);   // always open with the chosen drill
+        }
+      }
+      run = { exKey, size: RUN_SIZE, done: 0, results: [], start: performance.now(), queue };
+      openDrill(queue ? queue[0] : exKey, null); return;
     }
     run = null;
     // reference exercise → choose an image (exclude the abstract line/shape worksheets;
@@ -596,14 +621,19 @@
     // DERIVED from the curriculum so a new scored drill can never be left out
     // of sessions again (it happened with curve, then gesture)
     const allScored = A.curr.EXERCISES.filter((e) => e.scored).map((e) => e.key);
+    // weight the mix toward what the schedule says needs work: due drills and
+    // the weakest drill appear twice in the sampling pool
+    const due = A.curr.dueDrills(A.habit.today()).map((d) => d.key);
+    const wk = attemptsCache && A.game.weakestDrill(attemptsCache);
+    const pool = allScored.concat(due).concat(wk && wk.exKey ? [wk.exKey] : []);
     const queue = kind === 'warmup'
       ? shuffledQueue(allScored.slice(0, 4), cfg.n)          // quick session: the foundations
-      : shuffledQueue(allScored, cfg.n);
+      : shuffledQueue(pool, cfg.n);
     session = { kind, queue, completed: 0, results: [], day: A.habit.today() };
     // mixed sessions end on a FINISHER: the capstone drill one level up
     // (peak-end rule — the session's last memory is a real challenge). It never
     // feeds the level window, so difficulty stays honest.
-    if (kind === 'mixed') { queue[queue.length - 1] = 'envelope'; session.finisherIdx = queue.length - 1; }
+    if (kind === 'mixed') { queue[queue.length - 1] = (wk && wk.exKey) || 'envelope'; session.finisherIdx = queue.length - 1; }
     run = null;
     sessionStart = performance.now();
     saveSession();
@@ -657,13 +687,31 @@
     }
     if (run) {
       if (run.done >= run.size) { finishRun(); return; }
+      if (run.queue) { drill.startExercise(run.queue[Math.min(run.done, run.queue.length - 1)], null); return; }
       drill.next(); return;
     }
     drill.next();
   }
-  // "Skip" = a fresh figure of the SAME exercise/difficulty; does NOT count as progress
+  // "Skip" = a fresh figure of the SAME exercise/difficulty; does NOT count as
+  // progress. But a skip AFTER the figure was exposed is also an evasion channel
+  // (discard hard figures until an easy one appears → a cherry-picked promotion
+  // window). First skip per sitting is free; further ones enter the window as a
+  // weak score, so the gate stays honest.
   function sessionSkip() {
-    if (!session) { drill.next(); return; }
+    if (drill.def && drill.def.scored && (drill.phase === 'study' || drill.phase === 'draw')) {
+      const box = session || run;
+      if (box) {
+        box._skips = (box._skips || 0) + 1;
+        if (box._skips > 1) {
+          A.curr.recordScore(drill.exKey, 55, A.habit.today());
+          toast('Skip counted — repeated skips after seeing the figure feed the level window.');
+        }
+      }
+    }
+    if (!session) {
+      if (run && run.queue) { drill.startExercise(run.queue[Math.min(run.done, run.queue.length - 1)], null); return; }
+      drill.next(); return;
+    }
     const i = session.completed;
     drill.startExercise(session.queue[i], null, sessOpts(i));
   }
@@ -879,14 +927,18 @@
     }
     else if (drill.phase === 'estimate') {
       instr.textContent = 'Before the answer — how close were you?';
+      // no default number: an anchored slider quietly compresses every estimate
+      // toward the anchor and corrupts the calibration stats (perceive.js
+      // randomizes its start for the same reason). Judge first, then reveal.
+      const estStart = 35 + Math.floor(Math.random() * 51);   // random, off-screen until touched
       result.innerHTML = `<div class="card resultcard">
         <div class="small" style="margin-bottom:4px">Guess your accuracy %, then see the actual.</div>
-        <div class="scorebadge" id="d-estv" style="font-size:34px">70%</div>
+        <div class="scorebadge" id="d-estv" style="font-size:34px">?</div>
         <div class="estq" style="margin:6px 0">
           ${[30, 50, 65, 75, 85, 95].map((p) => `<button data-estbox="${p}">${p}%</button>`).join('')}</div>
         <div class="row center" style="gap:8px"><span class="tiny muted">or fine-tune</span>
-          <input type="range" id="d-est" min="0" max="100" value="70" style="flex:1"></div>
-        <button class="btn block" data-estconfirm="1" style="margin-top:8px">Reveal ›</button>
+          <input type="range" id="d-est" min="0" max="100" value="${estStart}" style="flex:1"></div>
+        <button class="btn block" data-estconfirm="1" disabled style="margin-top:8px">Reveal ›</button>
         <div class="tiny muted" style="margin-top:6px">Tap a box, or drag then Reveal. Guessing first trains your eye.</div></div>`;
       controls.innerHTML = '';
     }
@@ -921,7 +973,7 @@
       tutMsg = `<div class="insight" style="text-align:left"><b>That’s the whole method.</b> You guessed ${r.selfEstimate}%, it was ${r.score}%. Shrinking that gap — seeing your own errors before being told — is what every drill here trains.</div>`;
     }
     const glanceMsg = (!r.repeat && !r.recall && drill.glanceCount > 0)
-      ? `<div class="tiny muted" style="margin-bottom:6px">${drill.glanceCount} glance${drill.glanceCount > 1 ? 's' : ''} used — level credit reduced by ${drill.glanceCount * 5}.</div>` : '';
+      ? `<div class="tiny muted" style="margin-bottom:6px">${drill.glanceCount} glance${drill.glanceCount > 1 ? 's' : ''} used — scored and coached, but a glanced trial isn’t level evidence.</div>` : '';
     // where this score sits vs the ~85% level-up threshold (faded: scored, genuine trials only)
     const atCapNow = drill.def && drill.level >= (drill.def.maxLevel || 9);
     const targetHint = (!r.repeat && !r.recall && !r.finisher && drill.def && drill.def.scored)
@@ -953,6 +1005,8 @@
     }
     const lc = r.levelChange;
     const atCap = lc && lc.changed && lc.dir > 0 && drill.def && lc.level >= (drill.def.maxLevel || 9);
+    const pendMsg = lc && lc.pending
+      ? `<div class="insight" style="text-align:left">◷ Level-up earned — pending a <b>cold retention check</b>. Pass tomorrow's recall of this drill to certify it (Lecoq's standard: memory across a night's sleep).</div>` : '';
     const lvlMsg = lc && lc.changed
       ? (atCap
         ? `<div class="insight" style="background:var(--warn);color:#fff">❖ Master’s mark — ${esc(drill.def.name)} held at the top level. From here, spaced reviews keep it sharp.</div>`
@@ -978,7 +1032,7 @@
     result.innerHTML = `<div class="card resultcard">
       <div class="scorebadge ${scoreClass(r.score)}">${r.score}</div>
       <div class="muted small" style="margin-bottom:8px">${r.recall ? 'retention accuracy' : 'accuracy'}${targetHint}</div>${pbMsg}${tutMsg}${modeMsg}${glanceMsg}${redrawNudge}
-      ${estRow}${detail}${coachRow}${learnRow}${lvlMsg}</div>`;
+      ${estRow}${detail}${coachRow}${learnRow}${pendMsg}${lvlMsg}</div>`;
     if (!r.showDetail) {
       const slot = $('#d-detail', result);
       if (slot) slot.querySelector('[data-showdetail]').onpointerup = (e) => { e.preventDefault(); slot.innerHTML = metricRows; };
@@ -1185,7 +1239,7 @@
       };
       result.oninput = (e) => {
         if (e.target.id === 'd-op') drill.setGhostOpacity(e.target.value / 100);
-        if (e.target.id === 'd-est') { const o = $('#d-estv'); if (o) o.textContent = e.target.value + '%'; $$('#d-result [data-estbox]').forEach((x) => x.classList.remove('sel')); }
+        if (e.target.id === 'd-est') { const o = $('#d-estv'); if (o) o.textContent = e.target.value + '%'; const c = $('#d-result [data-estconfirm]'); if (c) c.disabled = false; $$('#d-result [data-estbox]').forEach((x) => x.classList.remove('sel')); }
       };
     }
   }

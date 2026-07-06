@@ -2321,16 +2321,16 @@ window.ATELIER_REFS = [{"id": "ws-lines-1","title": "Straight lines \u2014 set 1
     { key: 'curve', name: 'Curves', module: 1, scored: true,
       blurb: 'Reproduce a curve from memory — fix its start, end and apex (its furthest bow).',
       study: (l) => clamp(Math.round(12 - l), 3, 12), draw: 18, maxLevel: 9 },
-    { key: 'polygon', name: 'Polygons', module: 2, scored: true,
+    { key: 'polygon', name: 'Polygons', module: 2, scored: true, recallable: true,
       blurb: 'Closed straight-sided shapes, triangles to asymmetric n-gons.',
       study: (l) => clamp(Math.round(18 - l * 1.2), 4, 18), draw: 30, maxLevel: 9 },
-    { key: 'envelope', name: 'Complex Envelopes', module: 3, scored: true,
+    { key: 'envelope', name: 'Complex Envelopes', module: 3, scored: true, recallable: true,
       blurb: 'Real organic forms: block the outer envelope in straight lines, then refine to the true contour.',
       study: (l) => clamp(Math.round(26 - l * 1.6), 6, 26), draw: 45, maxLevel: 9 },
-    { key: 'gesture', name: 'Gesture (Line of Action)', module: 3, scored: true,
+    { key: 'gesture', name: 'Gesture (Line of Action)', module: 3, scored: true, recallable: true,
       blurb: 'Capture a pose’s line of action from memory — one flowing line through the whole figure.',
       study: (l) => clamp(Math.round(10 - l), 2, 10), draw: 20, maxLevel: 9 },
-    { key: 'shade', name: 'Terminator (Light & Shadow)', module: 4, scored: true,
+    { key: 'shade', name: 'Terminator (Light & Shadow)', module: 4, scored: true, recallable: true,
       blurb: 'Study a lit form, then draw the shadow line — where light turns to dark — from memory, on the bare form.',
       study: (l) => clamp(Math.round(14 - l), 3, 14), draw: 25, maxLevel: 9 },
     { key: 'sightsize', name: 'Sight-Size Copy', module: 4, scored: false, refCat: 'any',
@@ -2360,7 +2360,7 @@ window.ATELIER_REFS = [{"id": "ws-lines-1","title": "Straight lines \u2014 set 1
   // leave the learner grinding a level they clear only half the time.
   const ADVANCE = 85, REGRESS = 60, WINDOW = 5;
   // spaced-repetition boxes (Leitner): review interval in days per box
-  const INTERVALS = [1, 2, 4, 7, 14];
+  const INTERVALS = [1, 2, 4, 7, 14, 30, 60];
 
   const curr = {
     EXERCISES,
@@ -2385,7 +2385,13 @@ window.ATELIER_REFS = [{"id": "ws-lines-1","title": "Straight lines \u2014 set 1
     },
     studySeconds(key) {
       const d = BY_KEY[key];
-      return d ? d.study(this.level(key)) : 30;
+      if (!d) return 30;
+      // within-level staircase (85%-rule as a dial, not just a gate): the look
+      // shortens while you're cruising and relaxes while you strain, keeping
+      // each trial near the optimal-error sweet spot between promotions
+      const st = this._state()[key];
+      const pace = (st && st.pace) || 1;
+      return Math.max(1, Math.round(d.study(this.level(key)) * pace));
     },
 
     // record a scored attempt → maybe advance/regress level. Returns {changed,dir,level}.
@@ -2401,22 +2407,62 @@ window.ATELIER_REFS = [{"id": "ws-lines-1","title": "Straight lines \u2014 set 1
       st.window.push({ s: score, d: day || '' });
       if (st.window.length > WINDOW) st.window.shift();
       const scoreOf = (w) => (typeof w === 'object' && w ? w.s : w);   // tolerate old numeric entries
-      let changed = false, dir = 0;
+      // whether this attempt is servicing a DUE review — decided before we
+      // touch sched.last (review-contingent spacing needs the pre-attempt state)
+      const wasDue = day ? this.dueIn(key, day) <= 0 : false;
+      // per-trial staircase: >=90 tightens the next look x0.9, <70 relaxes x1.15
+      const pace = st.pace || 1;
+      if (score >= 90) st.pace = Math.max(0.5, +(pace * 0.9).toFixed(3));
+      else if (score < 70) st.pace = Math.min(1.25, +(pace * 1.15).toFixed(3));
+      let changed = false, dir = 0, pending = false;
       if (st.window.length >= WINDOW) {
         const xs = st.window.map(scoreOf);
         const mean = xs.reduce((a, b) => a + b, 0) / xs.length;
         const weakest = Math.min.apply(null, xs);
         const days = new Set(st.window.map((w) => (typeof w === 'object' && w ? w.d : '')).filter(Boolean)).size;
-        if (mean >= ADVANCE && weakest >= 70 && days >= 2 && st.level < d.maxLevel) { st.level++; st.window = []; changed = true; dir = 1; }
-        else if (mean <= REGRESS && st.level > 1) { st.level--; st.window = []; changed = true; dir = -1; }
+        const gateOk = mean >= ADVANCE && weakest >= 70 && days >= 2 && st.level < d.maxLevel;
+        // retention gate (composite figures only): same-day scores are a biased
+        // index of learning — a level is certified by a cold recall, Lecoq's
+        // own standard. Simple figures (line/angle/curve) have no episodic
+        // content to recall across a night, so they promote on the window alone.
+        if (gateOk && d.recallable && !st.recallOk) { st.pendPromo = true; pending = true; }
+        else if (gateOk) { st.level++; st.window = []; changed = true; dir = 1; st.pace = 1; st.recallOk = false; st.pendPromo = false; }
+        else if (mean <= REGRESS && st.level > 1) { st.level--; st.window = []; changed = true; dir = -1; st.pace = 1; }
       }
-      // spaced-repetition state (Leitner-lite): a drill that just promoted moves
-      // to a longer review interval; one that regressed comes back sooner.
+      // spaced repetition, review-contingent (the point of Leitner): passing a
+      // DUE review grows the gap, failing it shrinks it. Promotion still bumps.
       const sch = st.sched || (st.sched = { box: 0, last: '' });
       if (changed) sch.box = Math.max(0, Math.min(INTERVALS.length - 1, sch.box + dir));
+      else if (wasDue) {
+        if (score >= 80) sch.box = Math.min(INTERVALS.length - 1, sch.box + 1);
+        else if (score < 65) sch.box = Math.max(0, sch.box - 1);
+      }
       sch.last = day || sch.last;
       this._save(s);
-      return { changed, dir, level: st.level };
+      return { changed, dir, level: st.level, pending };
+    },
+
+    // a cold retention check reported back: success unlocks a pending promotion
+    // and expands the next recall lag; a clear failure contracts the schedule
+    noteRecall(key, score, day) {
+      const d = BY_KEY[key];
+      if (!d || !d.recallable) return;
+      const s = this._state();
+      const st = s[key] || (s[key] = { level: 1, window: [] });
+      if (score >= 60) st.recallOk = true;
+      if (score >= 70) st.rlag = Math.min(3, (st.rlag || 0) + 1);
+      else if (score < 50) { st.rlag = 0; if (st.sched) st.sched.box = Math.max(0, st.sched.box - 1); }
+      this._save(s);
+    },
+    // expanding-retrieval lag (days) for the next recall of this drill
+    recallLag(key) {
+      const st = this._state()[key];
+      return [1, 3, 7, 14][(st && st.rlag) || 0];
+    },
+    // promotion earned on the window but awaiting its cold recall?
+    pendingPromo(key) {
+      const st = this._state()[key];
+      return !!(st && st.pendPromo);
     },
 
     // days until a drill is due for review (negative = overdue). Never-practised
@@ -2848,7 +2894,7 @@ window.ATELIER_REFS = [{"id": "ws-lines-1","title": "Straight lines \u2014 set 1
      prescribing it — autonomy-supportive, per OPTIMAL theory. Completing the
      plan (not raw minutes) is what feeds the streak in 'plan' goal mode.     */
   // all perception-drill attempt types (adjustment + forced-choice) count as warm-up
-  const PERC_TYPES = ['perc-angle', 'perc-prop', 'perc-curve', 'perc-value', 'afc-angle', 'afc-length'];
+  const PERC_TYPES = ['perc-angle', 'perc-prop', 'perc-curve', 'perc-value', 'afc-angle', 'afc-length', 'afc-curve', 'afc-value'];
   function planPick(attempts) {
     const today = todayStr();
     const stored = A.store.get('planPick', null);
@@ -3173,7 +3219,8 @@ window.ATELIER_REFS = [{"id": "ws-lines-1","title": "Straight lines \u2014 set 1
   // practice (Lecoq) pushed this delay out to a full day; here it scales with
   // level. Skipped for beginners so early success stays encouraging.
   Drill.prototype._holdSeconds = function () {
-    if (!this.def.scored || this.level < 4) return 0;
+    if (!this.def.scored || this.level < 2) return 0;    // level 1 stays frictionless
+    if (this.level < 4) return 1.5;                      // beyond iconic persistence (Sperling)
     return Math.min(12, 3 + (this.level - 4) * 2);       // L4: 3s → L9: 12s (capped)
   };
 
@@ -3257,6 +3304,12 @@ window.ATELIER_REFS = [{"id": "ws-lines-1","title": "Straight lines \u2014 set 1
     setTimeout(() => {
       this.surface.showTarget = false; this.surface.ghostStudy = false;
       this.surface.setGhost(null); this.surface.redraw();
+      // brief re-encode hold after a manual glance — draw from the refreshed
+      // memory, not the fading trace
+      if (manual !== false && this.def.scored) {
+        this.surface.locked = true;
+        setTimeout(() => { if (this.phase === 'draw') { this.surface.locked = false; } }, 900);
+      }
     }, ms || 600);
   };
 
@@ -3355,9 +3408,8 @@ window.ATELIER_REFS = [{"id": "ws-lines-1","title": "Straight lines \u2014 set 1
     // Manual glances cost level credit: the score stands, but each peek shaves
     // the value the promotion window sees (memory training isn't defeated quietly).
     let adv = { changed: false, level: this.level };
-    if (!this.isRepeat && !this.isRecall && !this.isFinisher) {
-      const credit = Math.max(0, r.score - 5 * (this.glanceCount || 0));
-      adv = A.curr.recordScore(this.exKey, credit, dayKey());
+    if (!this.isRepeat && !this.isRecall && !this.isFinisher && !(this.glanceCount > 0)) {
+      adv = A.curr.recordScore(this.exKey, r.score, dayKey());
       this.level = adv.level;
     }
     this.result = { score: r.score, selfRated: false, metrics: r.metrics,
@@ -3411,6 +3463,7 @@ window.ATELIER_REFS = [{"id": "ws-lines-1","title": "Straight lines \u2014 set 1
       refId: this.ref ? this.ref.id : null, refTitle: this.ref ? this.ref.title : null
     };
     A.store.addAttempt(att);
+    if (this.isRecall && this.def.scored) A.curr.noteRecall(this.exKey, score, att.day);
     A.habit.touch((this.studySec || 0) + (this.drawSec || 0));
     if (!this.def.scored && !this.isRepeat) A.curr.touchRef(this.exKey, att.day);   // spaced review for plates
     if (this.exKey === 'bargue' && att.refId) A.game.notePlate(att.refId, score);   // plate-course best
@@ -3769,8 +3822,10 @@ window.ATELIER_REFS = [{"id": "ws-lines-1","title": "Straight lines \u2014 set 1
      Ends after 16 taps; the threshold (mean of the last reversals) is the
      score that should shrink over weeks.                                     */
   const AFC = {
-    angle:  { start: 14, min: 1,  max: 30, unit: '°',  ask: 'Which line is steeper?' },
-    length: { start: 18, min: 2,  max: 40, unit: '%',  ask: 'Which line is longer?' }
+    angle:  { start: 14, min: 1,   max: 30, unit: '°', factor: 6, ask: 'Which line is steeper?' },
+    length: { start: 18, min: 2,   max: 40, unit: '%', factor: 4, ask: 'Which line is longer?' },
+    curve:  { start: 10, min: 0.8, max: 22, unit: '%', factor: 5, ask: 'Which curve bows more?' },
+    value:  { start: 16, min: 1.5, max: 34, unit: '',  factor: 3, ask: 'Which is darker?' }
   };
   // pure staircase step (exported for tests): 2 consecutive correct → harder
   // (smaller diff); any miss → easier. Reversals mark the oscillation points.
@@ -3787,11 +3842,18 @@ window.ATELIER_REFS = [{"id": "ws-lines-1","title": "Straight lines \u2014 set 1
     return out;
   }
 
-  const AFC_TAPS = 16;
+  // a reliable staircase threshold needs ~6-8 reversals (Levitt 1971) — the old
+  // 16-tap / 4-reversal run measured mostly luck, so week-over-week progress
+  // drowned in test-retest noise. Now: warm-start near your last threshold
+  // (converges in a few trials), run to 8 reversals (or a 30-trial cap),
+  // average the last 6 reversals.
+  const AFC_TAPS = 30, AFC_REVS = 8;
   function startAFC(kind) {
     build(); el.classList.add('on');
     const cfg = AFC[kind] || AFC.angle;
-    st = { afc: kind, cfg, diff: cfg.start, streak: 0, lastDir: null,
+    const last = A.store.get('afcLast', {})[kind];
+    const startD = last ? Math.max(cfg.min, Math.min(cfg.max, last * 1.5)) : cfg.start;
+    st = { afc: kind, cfg, diff: startD, streak: 0, lastDir: null,
            reversals: [], taps: 0, hits: 0, t0: performance.now(), timer: null };
     setRing(0, false, 'discriminate');
     afcRound();
@@ -3799,7 +3861,7 @@ window.ATELIER_REFS = [{"id": "ws-lines-1","title": "Straight lines \u2014 set 1
   function afcRound() {
     const cfg = st.cfg;
     st.diff = Math.max(cfg.min, Math.min(cfg.max, st.diff));
-    timerEl.textContent = (st.taps + 1) + '/' + AFC_TAPS;
+    timerEl.textContent = Math.min(st.reversals.length, AFC_REVS) + '/' + AFC_REVS;
     instr.textContent = cfg.ask + '  ·  Δ ' + st.diff.toFixed(1) + cfg.unit;
     st.moreIsLeft = Math.random() < 0.5;
     let leftSVG, rightSVG;
@@ -3809,6 +3871,18 @@ window.ATELIER_REFS = [{"id": "ws-lines-1","title": "Straight lines \u2014 set 1
       const lo = base;
       const draw = (deg) => `<line x1="60" y1="170" x2="${60 + Math.cos(deg * Math.PI / 180) * 130}" y2="${170 - Math.sin(deg * Math.PI / 180) * 130}" stroke="var(--ink)" stroke-width="4" stroke-linecap="round"/>`;
       leftSVG = draw(st.moreIsLeft ? hi : lo); rightSVG = draw(st.moreIsLeft ? lo : hi);
+    } else if (st.afc === 'curve') {
+      const base = rnd(0.14, 0.30);                          // bow as fraction of chord
+      const hi = base + st.diff / 100, lo = base;
+      const bowPath = (b) => { const x0 = 40, x1 = 230, y = 150; const mx = (x0 + x1) / 2, my = y - b * (x1 - x0);
+        return `<path d="M ${x0} ${y} Q ${mx} ${my} ${x1} ${y}" fill="none" stroke="var(--ink)" stroke-width="4" stroke-linecap="round"/>`; };
+      leftSVG = bowPath(st.moreIsLeft ? hi : lo); rightSVG = bowPath(st.moreIsLeft ? lo : hi);
+    } else if (st.afc === 'value') {
+      const base = rnd(28, 58);                              // darkness 0-100; higher = darker
+      const hi = base + st.diff, lo = base;
+      const patch = (dk) => { const g = Math.round(255 * (1 - dk / 100));
+        return `<rect x="70" y="70" width="120" height="120" rx="10" fill="rgb(${g},${g},${g})"/>`; };
+      leftSVG = patch(st.moreIsLeft ? hi : lo); rightSVG = patch(st.moreIsLeft ? lo : hi);
     } else {
       const base = rnd(90, 130);
       const hi = base * (1 + st.diff / 100), lo = base;
@@ -3832,18 +3906,18 @@ window.ATELIER_REFS = [{"id": "ws-lines-1","title": "Straight lines \u2014 set 1
     const stepped = stairStep(st, correct);
     if (stepped.reversal) st.reversals.push(st.diff);
     st.diff = stepped.diff; st.streak = stepped.streak; st.lastDir = stepped.lastDir;
-    setRing(st.taps / AFC_TAPS, false, 'discriminate');
+    setRing(Math.min(1, st.reversals.length / AFC_REVS), false, 'discriminate');
     instr.textContent = correct ? '✓ Correct' : '✗ Not this time';
-    if (st.taps >= AFC_TAPS) { setTimeout(afcEnd, 420); }
+    if (st.reversals.length >= AFC_REVS || st.taps >= AFC_TAPS) { setTimeout(afcEnd, 420); }
     else setTimeout(afcRound, 420);
   }
   function afcEnd() {
     const cfg = st.cfg;
-    const revs = st.reversals.slice(-4);
+    const revs = st.reversals.slice(-6);
     const threshold = +(revs.length >= 2 ? revs.reduce((a, b) => a + b, 0) / revs.length : st.diff).toFixed(1);
     const elapsed = (performance.now() - st.t0) / 1000;
     const type = 'afc-' + st.afc;
-    const score = Math.max(0, Math.min(100, Math.round(100 - threshold * (st.afc === 'angle' ? 6 : 4))));
+    const score = Math.max(0, Math.min(100, Math.round(100 - threshold * (cfg.factor || 4))));
     A.store.addAttempt({
       ts: Date.now(), day: dayKey(), type, scored: true, level: 1,
       studySec: 0, drawSec: +elapsed.toFixed(1), score,
@@ -3855,6 +3929,7 @@ window.ATELIER_REFS = [{"id": "ws-lines-1","title": "Straight lines \u2014 set 1
     const bests = A.store.get('afcBest', {});
     const isBest = bests[st.afc] == null || threshold < bests[st.afc];
     if (isBest) { bests[st.afc] = threshold; A.store.set('afcBest', bests); }
+    const lasts = A.store.get('afcLast', {}); lasts[st.afc] = threshold; A.store.set('afcLast', lasts);   // warm start for next run
     if (A.ui && A.ui.invalidate) A.ui.invalidate();
     timerEl.textContent = ''; setRing(0, false, '');
     instr.textContent = 'Discrimination threshold.';
@@ -3872,7 +3947,7 @@ window.ATELIER_REFS = [{"id": "ws-lines-1","title": "Straight lines \u2014 set 1
   }
 
   A.Perceive = { start, startAFC, stairStep,
-                 kinds: ['angle', 'prop', 'curve', 'value'], afcKinds: ['angle', 'length'] };
+                 kinds: ['angle', 'prop', 'curve', 'value'], afcKinds: ['angle', 'length', 'curve', 'value'] };
 })(window.A = window.A || {});
 
 
@@ -4538,7 +4613,8 @@ window.ATELIER_REFS = [{"id": "ws-lines-1","title": "Straight lines \u2014 set 1
   const SESSIONS = { warmup: { n: 6, min: 5 }, mixed: { n: 12, min: 15 } };
   const PERC_LABELS = { 'perc-angle': 'Perceive: Angle', 'perc-prop': 'Perceive: Proportion',
     'perc-curve': 'Perceive: Curve', 'perc-value': 'Perceive: Value',
-    'afc-angle': 'Discriminate: Angle', 'afc-length': 'Discriminate: Length' };
+    'afc-angle': 'Discriminate: Angle', 'afc-length': 'Discriminate: Length',
+    'afc-curve': 'Discriminate: Curve', 'afc-value': 'Discriminate: Value' };
   const exName = (type) => { const d = A.curr.def(type); return d ? d.name : (PERC_LABELS[type] || type); };
   const LOOKCUE = {
     line: 'its slant & length', angles: 'the angles between & the relative lengths',
@@ -4662,11 +4738,18 @@ window.ATELIER_REFS = [{"id": "ws-lines-1","title": "Straight lines \u2014 set 1
   async function startRecall() {
     const all = await attempts();
     const today = A.habit.today();
-    const pool = all.filter((a) => a.scored && !a.repeat && !a.recall && a.day && a.day < today && a.target);
-    if (!pool.length) { toast('No previous figures to recall yet — practise today, test tomorrow.'); return; }
-    const days = Array.from(new Set(pool.map((a) => a.day))).sort().reverse().slice(0, 7);
-    const day = days[Math.floor(Math.random() * Math.min(3, days.length))];   // mostly yesterday-ish
-    const cand = pool.filter((a) => a.day === day);
+    // only composite figures: a single line or angle-pair has no episodic
+    // content to hold across a night — cross-day recall is meaningful for
+    // polygons, envelopes, gestures and shadow shapes (def.recallable)
+    const pool = all.filter((a) => a.scored && !a.repeat && !a.recall && a.day && a.day < today && a.target
+      && A.curr.def(a.type) && A.curr.def(a.type).recallable);
+    if (!pool.length) { toast('No previous figures to recall yet — practise shapes today, test tomorrow.'); return; }
+    // expanding retrieval: aim each drill at its own lag (1→3→7→14 days,
+    // growing on success, resetting on failure — Landauer & Bjork)
+    const age = (k) => { const p = (d) => { const x = d.split('-'); return Date.UTC(+x[0], +x[1] - 1, +x[2]); }; return Math.round((p(today) - p(k)) / 864e5); };
+    const scored = pool.map((a) => ({ a, gap: Math.abs(age(a.day) - A.curr.recallLag(a.type)) }));
+    const best = Math.min.apply(null, scored.map((x) => x.gap));
+    const cand = scored.filter((x) => x.gap <= best + 1).map((x) => x.a);
     const att = cand[Math.floor(Math.random() * cand.length)];
     run = null; session = null;
     const d = $('#drill'); d.classList.add('on');
@@ -4909,10 +4992,10 @@ window.ATELIER_REFS = [{"id": "ws-lines-1","title": "Straight lines \u2014 set 1
         return `<button class="btn soft" data-perc="${k}">${names[k]} · Lv ${pl[k] || 1}</button>`;
       }).join('')}</div>
       <p class="small muted" style="margin:12px 0 8px"><b>Discriminate</b> — forced choice: which is steeper / longer? An adaptive staircase finds the smallest difference your eye can catch, then pushes it finer. Watch the threshold fall over weeks.</p>
-      <div class="row wrap">${['angle', 'length'].map((k) => {
+      <div class="row wrap">${['angle', 'length', 'curve', 'value'].map((k) => {
         const best = A.store.get('afcBest', {})[k];
-        const names = { angle: 'Which is steeper?', length: 'Which is longer?' };
-        const unit = k === 'angle' ? '°' : '%';
+        const names = { angle: 'Which is steeper?', length: 'Which is longer?', curve: 'Which bows more?', value: 'Which is darker?' };
+        const unit = k === 'angle' ? '°' : k === 'value' ? '' : '%';
         return `<button class="btn soft" data-afc="${k}">${names[k]}${best != null ? ` · best ${best}${unit}` : ''}</button>`;
       }).join('')}</div></div>`;
     v.innerHTML = `${recLine(all)}<div class="banner">Not sure where to start? Use the <b>recommended</b> step above. Otherwise, pick any single drill or a guided session below.</div>${sessions}${groups}`;
@@ -4929,9 +5012,26 @@ window.ATELIER_REFS = [{"id": "ws-lines-1","title": "Straight lines \u2014 set 1
   async function startExercise(exKey) {
     const def = A.curr.def(exKey);
     if (def.scored) {
-      // a standalone scored exercise runs as a SET of figures so it has a clear finish
-      run = { exKey, size: RUN_SIZE, done: 0, results: [], start: performance.now() };
-      openDrill(exKey, null); return;
+      // a standalone scored exercise runs as a SET of figures so it has a clear
+      // finish. Once the drill is established (level >= 3), the set interleaves
+      // 2 figures from due/weak drills — contextual interference: blocked feels
+      // better, interleaved retains better (Shea & Morgan; Brady meta-analysis).
+      let queue = null;
+      if (A.curr.level(exKey) >= 3) {
+        const all = await attempts();
+        const today = A.habit.today();
+        const others = A.curr.dueDrills(today).map((d) => d.key).filter((k) => k !== exKey);
+        const w = A.game.weakestDrill(all);
+        if (w && w.exKey && w.exKey !== exKey && others.indexOf(w.exKey) < 0) others.push(w.exKey);
+        const extras = others.slice(0, 2);
+        if (extras.length) {
+          const rest = [exKey, exKey].concat(extras).concat(extras.length < 2 ? [exKey] : []);
+          for (let i = rest.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); const t = rest[i]; rest[i] = rest[j]; rest[j] = t; }
+          queue = [exKey].concat(rest).slice(0, RUN_SIZE);   // always open with the chosen drill
+        }
+      }
+      run = { exKey, size: RUN_SIZE, done: 0, results: [], start: performance.now(), queue };
+      openDrill(queue ? queue[0] : exKey, null); return;
     }
     run = null;
     // reference exercise → choose an image (exclude the abstract line/shape worksheets;
@@ -5113,14 +5213,19 @@ window.ATELIER_REFS = [{"id": "ws-lines-1","title": "Straight lines \u2014 set 1
     // DERIVED from the curriculum so a new scored drill can never be left out
     // of sessions again (it happened with curve, then gesture)
     const allScored = A.curr.EXERCISES.filter((e) => e.scored).map((e) => e.key);
+    // weight the mix toward what the schedule says needs work: due drills and
+    // the weakest drill appear twice in the sampling pool
+    const due = A.curr.dueDrills(A.habit.today()).map((d) => d.key);
+    const wk = attemptsCache && A.game.weakestDrill(attemptsCache);
+    const pool = allScored.concat(due).concat(wk && wk.exKey ? [wk.exKey] : []);
     const queue = kind === 'warmup'
       ? shuffledQueue(allScored.slice(0, 4), cfg.n)          // quick session: the foundations
-      : shuffledQueue(allScored, cfg.n);
+      : shuffledQueue(pool, cfg.n);
     session = { kind, queue, completed: 0, results: [], day: A.habit.today() };
     // mixed sessions end on a FINISHER: the capstone drill one level up
     // (peak-end rule — the session's last memory is a real challenge). It never
     // feeds the level window, so difficulty stays honest.
-    if (kind === 'mixed') { queue[queue.length - 1] = 'envelope'; session.finisherIdx = queue.length - 1; }
+    if (kind === 'mixed') { queue[queue.length - 1] = (wk && wk.exKey) || 'envelope'; session.finisherIdx = queue.length - 1; }
     run = null;
     sessionStart = performance.now();
     saveSession();
@@ -5174,13 +5279,31 @@ window.ATELIER_REFS = [{"id": "ws-lines-1","title": "Straight lines \u2014 set 1
     }
     if (run) {
       if (run.done >= run.size) { finishRun(); return; }
+      if (run.queue) { drill.startExercise(run.queue[Math.min(run.done, run.queue.length - 1)], null); return; }
       drill.next(); return;
     }
     drill.next();
   }
-  // "Skip" = a fresh figure of the SAME exercise/difficulty; does NOT count as progress
+  // "Skip" = a fresh figure of the SAME exercise/difficulty; does NOT count as
+  // progress. But a skip AFTER the figure was exposed is also an evasion channel
+  // (discard hard figures until an easy one appears → a cherry-picked promotion
+  // window). First skip per sitting is free; further ones enter the window as a
+  // weak score, so the gate stays honest.
   function sessionSkip() {
-    if (!session) { drill.next(); return; }
+    if (drill.def && drill.def.scored && (drill.phase === 'study' || drill.phase === 'draw')) {
+      const box = session || run;
+      if (box) {
+        box._skips = (box._skips || 0) + 1;
+        if (box._skips > 1) {
+          A.curr.recordScore(drill.exKey, 55, A.habit.today());
+          toast('Skip counted — repeated skips after seeing the figure feed the level window.');
+        }
+      }
+    }
+    if (!session) {
+      if (run && run.queue) { drill.startExercise(run.queue[Math.min(run.done, run.queue.length - 1)], null); return; }
+      drill.next(); return;
+    }
     const i = session.completed;
     drill.startExercise(session.queue[i], null, sessOpts(i));
   }
@@ -5396,14 +5519,18 @@ window.ATELIER_REFS = [{"id": "ws-lines-1","title": "Straight lines \u2014 set 1
     }
     else if (drill.phase === 'estimate') {
       instr.textContent = 'Before the answer — how close were you?';
+      // no default number: an anchored slider quietly compresses every estimate
+      // toward the anchor and corrupts the calibration stats (perceive.js
+      // randomizes its start for the same reason). Judge first, then reveal.
+      const estStart = 35 + Math.floor(Math.random() * 51);   // random, off-screen until touched
       result.innerHTML = `<div class="card resultcard">
         <div class="small" style="margin-bottom:4px">Guess your accuracy %, then see the actual.</div>
-        <div class="scorebadge" id="d-estv" style="font-size:34px">70%</div>
+        <div class="scorebadge" id="d-estv" style="font-size:34px">?</div>
         <div class="estq" style="margin:6px 0">
           ${[30, 50, 65, 75, 85, 95].map((p) => `<button data-estbox="${p}">${p}%</button>`).join('')}</div>
         <div class="row center" style="gap:8px"><span class="tiny muted">or fine-tune</span>
-          <input type="range" id="d-est" min="0" max="100" value="70" style="flex:1"></div>
-        <button class="btn block" data-estconfirm="1" style="margin-top:8px">Reveal ›</button>
+          <input type="range" id="d-est" min="0" max="100" value="${estStart}" style="flex:1"></div>
+        <button class="btn block" data-estconfirm="1" disabled style="margin-top:8px">Reveal ›</button>
         <div class="tiny muted" style="margin-top:6px">Tap a box, or drag then Reveal. Guessing first trains your eye.</div></div>`;
       controls.innerHTML = '';
     }
@@ -5438,7 +5565,7 @@ window.ATELIER_REFS = [{"id": "ws-lines-1","title": "Straight lines \u2014 set 1
       tutMsg = `<div class="insight" style="text-align:left"><b>That’s the whole method.</b> You guessed ${r.selfEstimate}%, it was ${r.score}%. Shrinking that gap — seeing your own errors before being told — is what every drill here trains.</div>`;
     }
     const glanceMsg = (!r.repeat && !r.recall && drill.glanceCount > 0)
-      ? `<div class="tiny muted" style="margin-bottom:6px">${drill.glanceCount} glance${drill.glanceCount > 1 ? 's' : ''} used — level credit reduced by ${drill.glanceCount * 5}.</div>` : '';
+      ? `<div class="tiny muted" style="margin-bottom:6px">${drill.glanceCount} glance${drill.glanceCount > 1 ? 's' : ''} used — scored and coached, but a glanced trial isn’t level evidence.</div>` : '';
     // where this score sits vs the ~85% level-up threshold (faded: scored, genuine trials only)
     const atCapNow = drill.def && drill.level >= (drill.def.maxLevel || 9);
     const targetHint = (!r.repeat && !r.recall && !r.finisher && drill.def && drill.def.scored)
@@ -5470,6 +5597,8 @@ window.ATELIER_REFS = [{"id": "ws-lines-1","title": "Straight lines \u2014 set 1
     }
     const lc = r.levelChange;
     const atCap = lc && lc.changed && lc.dir > 0 && drill.def && lc.level >= (drill.def.maxLevel || 9);
+    const pendMsg = lc && lc.pending
+      ? `<div class="insight" style="text-align:left">◷ Level-up earned — pending a <b>cold retention check</b>. Pass tomorrow's recall of this drill to certify it (Lecoq's standard: memory across a night's sleep).</div>` : '';
     const lvlMsg = lc && lc.changed
       ? (atCap
         ? `<div class="insight" style="background:var(--warn);color:#fff">❖ Master’s mark — ${esc(drill.def.name)} held at the top level. From here, spaced reviews keep it sharp.</div>`
@@ -5495,7 +5624,7 @@ window.ATELIER_REFS = [{"id": "ws-lines-1","title": "Straight lines \u2014 set 1
     result.innerHTML = `<div class="card resultcard">
       <div class="scorebadge ${scoreClass(r.score)}">${r.score}</div>
       <div class="muted small" style="margin-bottom:8px">${r.recall ? 'retention accuracy' : 'accuracy'}${targetHint}</div>${pbMsg}${tutMsg}${modeMsg}${glanceMsg}${redrawNudge}
-      ${estRow}${detail}${coachRow}${learnRow}${lvlMsg}</div>`;
+      ${estRow}${detail}${coachRow}${learnRow}${pendMsg}${lvlMsg}</div>`;
     if (!r.showDetail) {
       const slot = $('#d-detail', result);
       if (slot) slot.querySelector('[data-showdetail]').onpointerup = (e) => { e.preventDefault(); slot.innerHTML = metricRows; };
@@ -5702,7 +5831,7 @@ window.ATELIER_REFS = [{"id": "ws-lines-1","title": "Straight lines \u2014 set 1
       };
       result.oninput = (e) => {
         if (e.target.id === 'd-op') drill.setGhostOpacity(e.target.value / 100);
-        if (e.target.id === 'd-est') { const o = $('#d-estv'); if (o) o.textContent = e.target.value + '%'; $$('#d-result [data-estbox]').forEach((x) => x.classList.remove('sel')); }
+        if (e.target.id === 'd-est') { const o = $('#d-estv'); if (o) o.textContent = e.target.value + '%'; const c = $('#d-result [data-estconfirm]'); if (c) c.disabled = false; $$('#d-result [data-estbox]').forEach((x) => x.classList.remove('sel')); }
       };
     }
   }
@@ -6247,8 +6376,8 @@ window.ATELIER_REFS = [{"id": "ws-lines-1","title": "Straight lines \u2014 set 1
   'use strict';
   // Stamped by build/build.js: A.VERSION from build/version.json, A.BUILD from
   // the build clock (YYMMDD.HHMM). These literals are only the un-built dev fallback.
-  A.VERSION = '1.10.0';
-  A.BUILD = '260706.2056';
+  A.VERSION = '1.11.0';
+  A.BUILD = '260706.2132';
   function boot() {
     try { A.ui.init(); }
     catch (e) {

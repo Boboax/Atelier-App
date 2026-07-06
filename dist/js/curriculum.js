@@ -32,16 +32,16 @@
     { key: 'curve', name: 'Curves', module: 1, scored: true,
       blurb: 'Reproduce a curve from memory — fix its start, end and apex (its furthest bow).',
       study: (l) => clamp(Math.round(12 - l), 3, 12), draw: 18, maxLevel: 9 },
-    { key: 'polygon', name: 'Polygons', module: 2, scored: true,
+    { key: 'polygon', name: 'Polygons', module: 2, scored: true, recallable: true,
       blurb: 'Closed straight-sided shapes, triangles to asymmetric n-gons.',
       study: (l) => clamp(Math.round(18 - l * 1.2), 4, 18), draw: 30, maxLevel: 9 },
-    { key: 'envelope', name: 'Complex Envelopes', module: 3, scored: true,
+    { key: 'envelope', name: 'Complex Envelopes', module: 3, scored: true, recallable: true,
       blurb: 'Real organic forms: block the outer envelope in straight lines, then refine to the true contour.',
       study: (l) => clamp(Math.round(26 - l * 1.6), 6, 26), draw: 45, maxLevel: 9 },
-    { key: 'gesture', name: 'Gesture (Line of Action)', module: 3, scored: true,
+    { key: 'gesture', name: 'Gesture (Line of Action)', module: 3, scored: true, recallable: true,
       blurb: 'Capture a pose’s line of action from memory — one flowing line through the whole figure.',
       study: (l) => clamp(Math.round(10 - l), 2, 10), draw: 20, maxLevel: 9 },
-    { key: 'shade', name: 'Terminator (Light & Shadow)', module: 4, scored: true,
+    { key: 'shade', name: 'Terminator (Light & Shadow)', module: 4, scored: true, recallable: true,
       blurb: 'Study a lit form, then draw the shadow line — where light turns to dark — from memory, on the bare form.',
       study: (l) => clamp(Math.round(14 - l), 3, 14), draw: 25, maxLevel: 9 },
     { key: 'sightsize', name: 'Sight-Size Copy', module: 4, scored: false, refCat: 'any',
@@ -71,7 +71,7 @@
   // leave the learner grinding a level they clear only half the time.
   const ADVANCE = 85, REGRESS = 60, WINDOW = 5;
   // spaced-repetition boxes (Leitner): review interval in days per box
-  const INTERVALS = [1, 2, 4, 7, 14];
+  const INTERVALS = [1, 2, 4, 7, 14, 30, 60];
 
   const curr = {
     EXERCISES,
@@ -96,7 +96,13 @@
     },
     studySeconds(key) {
       const d = BY_KEY[key];
-      return d ? d.study(this.level(key)) : 30;
+      if (!d) return 30;
+      // within-level staircase (85%-rule as a dial, not just a gate): the look
+      // shortens while you're cruising and relaxes while you strain, keeping
+      // each trial near the optimal-error sweet spot between promotions
+      const st = this._state()[key];
+      const pace = (st && st.pace) || 1;
+      return Math.max(1, Math.round(d.study(this.level(key)) * pace));
     },
 
     // record a scored attempt → maybe advance/regress level. Returns {changed,dir,level}.
@@ -112,22 +118,62 @@
       st.window.push({ s: score, d: day || '' });
       if (st.window.length > WINDOW) st.window.shift();
       const scoreOf = (w) => (typeof w === 'object' && w ? w.s : w);   // tolerate old numeric entries
-      let changed = false, dir = 0;
+      // whether this attempt is servicing a DUE review — decided before we
+      // touch sched.last (review-contingent spacing needs the pre-attempt state)
+      const wasDue = day ? this.dueIn(key, day) <= 0 : false;
+      // per-trial staircase: >=90 tightens the next look x0.9, <70 relaxes x1.15
+      const pace = st.pace || 1;
+      if (score >= 90) st.pace = Math.max(0.5, +(pace * 0.9).toFixed(3));
+      else if (score < 70) st.pace = Math.min(1.25, +(pace * 1.15).toFixed(3));
+      let changed = false, dir = 0, pending = false;
       if (st.window.length >= WINDOW) {
         const xs = st.window.map(scoreOf);
         const mean = xs.reduce((a, b) => a + b, 0) / xs.length;
         const weakest = Math.min.apply(null, xs);
         const days = new Set(st.window.map((w) => (typeof w === 'object' && w ? w.d : '')).filter(Boolean)).size;
-        if (mean >= ADVANCE && weakest >= 70 && days >= 2 && st.level < d.maxLevel) { st.level++; st.window = []; changed = true; dir = 1; }
-        else if (mean <= REGRESS && st.level > 1) { st.level--; st.window = []; changed = true; dir = -1; }
+        const gateOk = mean >= ADVANCE && weakest >= 70 && days >= 2 && st.level < d.maxLevel;
+        // retention gate (composite figures only): same-day scores are a biased
+        // index of learning — a level is certified by a cold recall, Lecoq's
+        // own standard. Simple figures (line/angle/curve) have no episodic
+        // content to recall across a night, so they promote on the window alone.
+        if (gateOk && d.recallable && !st.recallOk) { st.pendPromo = true; pending = true; }
+        else if (gateOk) { st.level++; st.window = []; changed = true; dir = 1; st.pace = 1; st.recallOk = false; st.pendPromo = false; }
+        else if (mean <= REGRESS && st.level > 1) { st.level--; st.window = []; changed = true; dir = -1; st.pace = 1; }
       }
-      // spaced-repetition state (Leitner-lite): a drill that just promoted moves
-      // to a longer review interval; one that regressed comes back sooner.
+      // spaced repetition, review-contingent (the point of Leitner): passing a
+      // DUE review grows the gap, failing it shrinks it. Promotion still bumps.
       const sch = st.sched || (st.sched = { box: 0, last: '' });
       if (changed) sch.box = Math.max(0, Math.min(INTERVALS.length - 1, sch.box + dir));
+      else if (wasDue) {
+        if (score >= 80) sch.box = Math.min(INTERVALS.length - 1, sch.box + 1);
+        else if (score < 65) sch.box = Math.max(0, sch.box - 1);
+      }
       sch.last = day || sch.last;
       this._save(s);
-      return { changed, dir, level: st.level };
+      return { changed, dir, level: st.level, pending };
+    },
+
+    // a cold retention check reported back: success unlocks a pending promotion
+    // and expands the next recall lag; a clear failure contracts the schedule
+    noteRecall(key, score, day) {
+      const d = BY_KEY[key];
+      if (!d || !d.recallable) return;
+      const s = this._state();
+      const st = s[key] || (s[key] = { level: 1, window: [] });
+      if (score >= 60) st.recallOk = true;
+      if (score >= 70) st.rlag = Math.min(3, (st.rlag || 0) + 1);
+      else if (score < 50) { st.rlag = 0; if (st.sched) st.sched.box = Math.max(0, st.sched.box - 1); }
+      this._save(s);
+    },
+    // expanding-retrieval lag (days) for the next recall of this drill
+    recallLag(key) {
+      const st = this._state()[key];
+      return [1, 3, 7, 14][(st && st.rlag) || 0];
+    },
+    // promotion earned on the window but awaiting its cold recall?
+    pendingPromo(key) {
+      const st = this._state()[key];
+      return !!(st && st.pendPromo);
     },
 
     // days until a drill is due for review (negative = overdue). Never-practised

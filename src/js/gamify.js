@@ -162,7 +162,7 @@
      prescribing it — autonomy-supportive, per OPTIMAL theory. Completing the
      plan (not raw minutes) is what feeds the streak in 'plan' goal mode.     */
   // all perception-drill attempt types (adjustment + forced-choice) count as warm-up
-  const PERC_TYPES = ['perc-angle', 'perc-prop', 'perc-curve', 'perc-value', 'afc-angle', 'afc-length'];
+  const PERC_TYPES = ['perc-angle', 'perc-prop', 'perc-curve', 'perc-value', 'afc-angle', 'afc-length', 'afc-curve', 'afc-value'];
   function planPick(attempts) {
     const today = todayStr();
     const stored = A.store.get('planPick', null);
