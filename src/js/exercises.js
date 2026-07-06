@@ -47,8 +47,28 @@
     this.isRecall = false;      // retention check on a previously-studied target
     this._timer = null;
     this.onState = null; this.onTick = null; this.onResult = null;
-    surface.onStrokeEnd = () => { if (this.onState) this.onState(this); };
+    surface.onStrokeEnd = () => {
+      // sight-size rhythm: count marks since the last step-back for the nudge
+      // (laying the string is a check, not a mark — don't count it)
+      if (this.exKey === 'sightsize' && this.phase === 'draw' && !surface.stringMode)
+        this.marksSinceStepBack = (this.marksSinceStepBack || 0) + 1;
+      if (this.onState) this.onState(this);
+    };
   }
+
+  // sight-size: after seeing the score, keep refining the SAME copy — the
+  // mark → compare → correct loop is the method itself
+  Drill.prototype.refineSightSize = function () {
+    if (this.exKey !== 'sightsize') return;
+    this.result = null; this.pending = null;
+    this.phase = 'draw';
+    this.surface.locked = false;
+    this.surface.setPhase('draw');
+    this.marksSinceStepBack = 0;
+    this.drawStart = performance.now();
+    this._startDrawTimer();
+    this._emit();
+  };
 
   Drill.prototype._emit = function () { if (this.onState) this.onState(this); };
 
@@ -71,8 +91,31 @@
     }).catch(() => {});
     this.ref = refItem || null;
     this.surface.reset();
+    // sight-size has no study/hide: the reference stays beside the drawing the
+    // whole time — the discipline is comparison, not memory
+    if (exKey === 'sightsize') { this._enterSightSize(); return; }
     this._newTargetGeom();
     this._enterStudy();
+  };
+
+  Drill.prototype._enterSightSize = function () {
+    this.phase = 'draw';
+    this.target = null;
+    this.surface.sightSize = true;
+    this.surface.resize();                       // relayout into the split panels
+    this.surface.locked = false;
+    this.surface.guides = false;
+    this.surface.setTarget(null);
+    this.surface.setGhost(this.ref ? this.ref.img : null, 1);
+    this.surface.setPhase('draw');
+    this.studySec = 0; this.studyElapsed = 0; this.glanceCount = 0; this.glanceCap = 0;
+    this.stages = null; this.stage = 0;
+    this.drawBudget = null;                      // sight-size is deliberately unhurried
+    this.drawElapsed = 0;
+    this.drawStart = performance.now();
+    this.marksSinceStepBack = 0;                 // feeds the step-back rhythm nudge
+    this._startDrawTimer();
+    this._emit();
   };
 
   Drill.prototype._newTargetGeom = function () {
@@ -248,6 +291,7 @@
     if (this.surface.isEmpty()) return false;
     if (this.exKey === 'line' || this.exKey === 'curve' || this.exKey === 'gesture' || this.exKey === 'shade') return this.surface.totalPoints() >= 2;
     if (this.exKey === 'polygon' || this.exKey === 'envelope') return this.surface.totalPoints() >= 3;
+    if (this.exKey === 'sightsize') return this.surface.totalPoints() >= 4;
     return true;
   };
 
@@ -263,6 +307,17 @@
     this.drawSec = (performance.now() - this.drawStart) / 1000;
     const strokes = this.surface.strokesDesign();
 
+    // sight-size: objective (position-sensitive) score, but still through the
+    // estimate-before-reveal step — judging your own copy first is the skill
+    if (this.exKey === 'sightsize' && this.ref && this.ref.img) {
+      const r = A.imgScore.sightScore(this.ref.img, this.surface.strokesDesign());
+      this.pending = r;
+      this.sessionIndex++;
+      this.phase = 'estimate';
+      this.surface.locked = true;
+      this._emit();
+      return;
+    }
     if (this.def.scored) {
       let r;
       if (this.exKey === 'line') {

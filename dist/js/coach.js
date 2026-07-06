@@ -24,6 +24,15 @@
         if (m.iou != null && m.iou < 0.6) return 'Follow the bend more closely — pin the start, end and apex (furthest bow) first.';
         return 'Nice curve — smooth and close to the path.';
       }
+      if (exKey === 'sightsize') {
+        const parts = [];
+        if (m.dy != null && Math.abs(m.dy) >= 4) parts.push(`sits ${Math.abs(m.dy)}% too ${m.dy > 0 ? 'low' : 'high'}`);
+        if (m.dx != null && Math.abs(m.dx) >= 4) parts.push(`${Math.abs(m.dx)}% too far ${m.dx > 0 ? 'right' : 'left'}`);
+        if (m.sizeErrPct != null && Math.abs(m.sizeErrPct) >= 5) parts.push(`${Math.abs(m.sizeErrPct)}% too ${m.sizeErrPct > 0 ? 'large' : 'small'}`);
+        if (parts.length) return 'Your copy ' + parts.join(', ') + ' — sight-size wants it exactly in place.';
+        if (m.iou != null && m.iou < 0.7) return 'Placement and size read true — now truer contours: flick plate \u2194 drawing more often.';
+        return 'A faithful copy — placement, size and contour all read true.';
+      }
       if (exKey === 'shade') {
         if (m.iou != null && m.iou < 0.7) return 'Find where the form turns from the light — place the boundary first, then follow its bow.';
         return 'Well placed — you saw where the form turns away from the light.';
@@ -79,6 +88,9 @@
       apex: { icon: '⌒', title: 'Pin the anchors, then the bow',
         why: 'A curve is fully described by its two endpoints and its apex — the furthest point it departs from the straight line between them. Fix those three and the curve almost draws itself.',
         how: 'Before the sweep, mark start, end, and where (and how far) it bows out. Draw through those points in one unhurried stroke rather than feeling your way along the edge.' },
+      sight: { icon: '⇄', title: 'Trust the flick, not the stare',
+        why: 'Sight-size works because the eye is superb at spotting a DIFFERENCE between two same-sized images and poor at measuring absolutes. Staring at your drawing alone tells you nothing; the information lives in the rapid comparison.',
+        how: 'Work in the rhythm: mark \u2192 flick eyes to the plate \u2192 correct. Step back before any big decision — at judging distance only the true errors survive. Lay the string across both panels when an angle or alignment is in doubt.' },
       terminator: { icon: '◑', title: 'The terminator follows the form',
         why: 'The shadow line isn’t an outline you copy — it’s where the surface turns away from the light. Its position is set by the light direction; its curve is set by the form. Misplacing it flattens the volume instantly.',
         how: 'First ask: where does the light come from? The terminator sits roughly a quarter-turn around from it. Then let its bow follow the form’s roundness — straighter on a cylinder, fuller on a sphere. Place, then curve.' },
@@ -104,6 +116,8 @@
         if (m.iou != null && m.iou < 0.75) return coach.PRINCIPLES.apex;
       } else if (exKey === 'gesture') {
         if (m.iou != null && m.iou < 0.8) return coach.PRINCIPLES.loa;
+      } else if (exKey === 'sightsize') {
+        if (r && r.score != null && r.score < 85) return coach.PRINCIPLES.sight;
       } else if (exKey === 'shade') {
         if (m.iou != null && m.iou < 0.8) return coach.PRINCIPLES.terminator;
       } else {   // polygon / envelope
