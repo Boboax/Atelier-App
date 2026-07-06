@@ -19,6 +19,15 @@ No feature reaches `main` without a version bump.
 
 ---
 
+## 1.8.1 — The practice day ends at 4 AM
+
+Fixes the after-midnight session stealing the next day's plan: practising in bed at 00:30 marked *tomorrow's* plan done and ticked its streak day.
+
+- **One shared day key** (`A.util.dayKey`, in storage.js) replaces four duplicated calendar-date computations (curriculum, exercises, gamify, perceive). The day now **rolls over at 04:00**, not midnight — a session after midnight belongs to the evening's sitting.
+- This makes "day" mean what every rule intends — *sittings separated by sleep*: the promotion gate's two-distinct-days requirement can no longer be satisfied by one sitting that straddles midnight, and the retention check ("recall across a night's sleep") can no longer serve a figure studied twenty minutes earlier.
+- Forward-only: already-stored day stamps are untouched; a plan already credited under the old rule stays credited for that one day.
+- Guard tests for the 4 AM boundary (incl. month/year edges and the midnight-straddle promotion loophole).
+
 ## 1.8.0 — Sight-size practice
 
 **New mode: Sight-Size Copy (Module 4)** — the classical atelier method as a first-class drill. The plate and your paper sit side by side at the same size, and you copy by pure eye comparison — no hiding, no memory clock; the discipline is the comparison itself.

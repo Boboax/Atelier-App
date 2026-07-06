@@ -69,3 +69,30 @@ test('stats: dailyTrend uses genuine scored trials only', () => {
   assert.equal(t.length, 1);
   assert.equal(t[0].score, 80);
 });
+
+// the practice day ends at 04:00, not midnight — a session in bed after
+// midnight belongs to the evening's sitting (it must not steal tomorrow's
+// plan, count as a second "distinct day" for promotion, or make a figure
+// studied 20 minutes ago eligible for a "recall across a night" check)
+test('dayKey: the practice day rolls over at 4 AM, not midnight', () => {
+  const { A } = freshEnv(LOGIC);
+  const k = (iso) => A.util.dayKey(0, new Date(iso));
+  assert.equal(k('2026-07-06T00:30:00'), '2026-07-05', 'after-midnight practice belongs to the evening before');
+  assert.equal(k('2026-07-06T03:59:00'), '2026-07-05', 'still the same sitting just before 4 AM');
+  assert.equal(k('2026-07-06T04:01:00'), '2026-07-06', 'a new day starts at 4 AM');
+  assert.equal(k('2026-07-06T23:50:00'), '2026-07-06', 'a late-evening session is that day');
+  // midnight straddle: 23:50 and 00:10 are ONE day — the promotion gate's
+  // two-distinct-days rule can no longer be met inside a single sitting
+  assert.equal(k('2026-07-06T23:50:00'), k('2026-07-07T00:10:00'));
+  // month/year boundaries survive the shift
+  assert.equal(k('2026-08-01T01:00:00'), '2026-07-31');
+  assert.equal(k('2027-01-01T02:00:00'), '2026-12-31');
+  // day offsets compose with the rollover
+  assert.equal(A.util.dayKey(-1, new Date('2026-07-06T00:30:00')), '2026-07-04');
+  assert.equal(A.util.dayKey(1, new Date('2026-07-06T12:00:00')), '2026-07-07');
+});
+
+test('dayKey: habit, curriculum and gamify all use the shared day', () => {
+  const { A } = freshEnv(LOGIC);
+  assert.equal(A.habit.today(), A.util.dayKey());
+});

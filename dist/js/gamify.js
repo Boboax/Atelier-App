@@ -152,7 +152,8 @@
     return worst ? { exKey: worst, mean: Math.round(worstMean) } : null;
   }
 
-  function todayStr() { const d = new Date(); return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'); }
+  // the 4 AM-rollover practice day — single source of truth in A.util (storage.js)
+  function todayStr() { return A.util.dayKey(); }
 
   /* ---- today's plan --------------------------------------------------------
      The daily ritual the recommendation engine already encodes, surfaced as
