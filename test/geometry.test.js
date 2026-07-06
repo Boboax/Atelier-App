@@ -165,3 +165,15 @@ test('generators: no NaN, polygons valid, scores in range (fuzz 2400)', () => {
   }
   assert.equal(bad, 0);
 });
+
+// distToSeg backs the string tool's grab detection (end-grab vs mid-grab vs new)
+test('distToSeg: segment distance, not infinite-line distance', () => {
+  const { A } = freshEnv(['js/geometry.js']);
+  const g = A.geom;
+  assert.equal(g.distToSeg([0.5, 0.5], [0, 0.5], [1, 0.5]), 0, 'on the segment');
+  assert.ok(Math.abs(g.distToSeg([0.5, 0.7], [0, 0.5], [1, 0.5]) - 0.2) < 1e-9, 'perpendicular offset');
+  // beyond the ends the distance is to the ENDPOINT (an infinite line would say 0)
+  assert.ok(Math.abs(g.distToSeg([1.3, 0.5], [0, 0.5], [1, 0.5]) - 0.3) < 1e-9, 'past b');
+  assert.ok(Math.abs(g.distToSeg([-0.4, 0.5], [0, 0.5], [1, 0.5]) - 0.4) < 1e-9, 'past a');
+  assert.ok(Math.abs(g.distToSeg([0.3, 0.4], [0.3, 0.1], [0.3, 0.1]) - 0.3) < 1e-9, 'degenerate segment = point');
+});

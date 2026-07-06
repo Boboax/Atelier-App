@@ -381,6 +381,16 @@ window.ATELIER_REFS = [{"id": "ws-lines-1", "title": "Straight lines — set 1",
 
   geom.dist = (a, b) => Math.hypot(a[0] - b[0], a[1] - b[1]);
 
+  // shortest distance from point p to the SEGMENT a-b (not the infinite line)
+  geom.distToSeg = function (p, a, b) {
+    const vx = b[0] - a[0], vy = b[1] - a[1];
+    const L2 = vx * vx + vy * vy;
+    if (L2 < 1e-12) return geom.dist(p, a);
+    let t = ((p[0] - a[0]) * vx + (p[1] - a[1]) * vy) / L2;
+    t = Math.max(0, Math.min(1, t));
+    return Math.hypot(p[0] - (a[0] + t * vx), p[1] - (a[1] + t * vy));
+  };
+
   // Total arc length of a polyline.
   geom.pathLength = function (pts) {
     let L = 0;
@@ -1693,8 +1703,23 @@ window.ATELIER_REFS = [{"id": "ws-lines-1", "title": "Straight lines — set 1",
       e.preventDefault();
       this._capture(e);
       this._activeId = e.pointerId;
-      this._stringing = true;
-      const p = this._design(e); this.stringLine = { a: p, b: p };
+      const p = this._design(e);
+      // grab the EXISTING string to work with it — the two-outstretched-hands
+      // gesture: mid-grab carries it rigidly (angle & length held) from the
+      // plate to the copy; an end-grab re-aims/re-lengths that end.
+      const s = this.stringLine;
+      const grab = !s ? null
+        : A.geom.dist(p, s.a) < 0.045 ? 'a'
+        : A.geom.dist(p, s.b) < 0.045 ? 'b'
+        : A.geom.distToSeg(p, s.a, s.b) < 0.03 ? 'move' : null;
+      if (grab) {
+        this._stringing = grab;
+        this._stringGrab = p;
+        this._stringOrig = { a: s.a.slice(), b: s.b.slice() };
+      } else {
+        this._stringing = 'new';
+        this.stringLine = { a: p, b: p };
+      }
       this.redraw();
       return;
     }
@@ -1746,7 +1771,18 @@ window.ATELIER_REFS = [{"id": "ws-lines-1", "title": "Straight lines — set 1",
       if (this._pinch) { e.preventDefault(); this._doPinch(); return; }
     }
     if (this._activeId != null && e.pointerId !== this._activeId) return;
-    if (this._stringing) { e.preventDefault(); this.stringLine.b = this._design(e); this._scheduleFull(); return; }
+    if (this._stringing) {
+      e.preventDefault();
+      const p = this._design(e), s = this.stringLine;
+      if (this._stringing === 'new' || this._stringing === 'b') s.b = p;
+      else if (this._stringing === 'a') s.a = p;
+      else {           // 'move': translate rigidly — angle & length stay locked
+        const dx = p[0] - this._stringGrab[0], dy = p[1] - this._stringGrab[1];
+        s.a = [this._stringOrig.a[0] + dx, this._stringOrig.a[1] + dy];
+        s.b = [this._stringOrig.b[0] + dx, this._stringOrig.b[1] + dy];
+      }
+      this._scheduleFull(); return;
+    }
     if (this._measuring) { e.preventDefault(); this._curMeasure.b = this._design(e); this._scheduleFull(); return; }
     if (this._cropping) { e.preventDefault(); this.cropRect[1] = this._design(e); this._scheduleFull(); return; }
     if (this._erasingActive) {
@@ -1790,8 +1826,11 @@ window.ATELIER_REFS = [{"id": "ws-lines-1", "title": "Straight lines — set 1",
     try { if (e && e.pointerId != null && this.canvas.releasePointerCapture) this.canvas.releasePointerCapture(e.pointerId); } catch (_) {}
     this._activeId = null;
     if (this._stringing) {
-      this._stringing = false;
-      if (this.stringLine && this._mlen({ a: this.stringLine.a, b: this.stringLine.b }) < 0.02) this.stringLine = null;   // a tap clears it
+      const mode = this._stringing;
+      this._stringing = false; this._stringGrab = null; this._stringOrig = null;
+      // a tap on EMPTY canvas clears the string; a tap ON the string (a grab
+      // that didn't move) leaves it in place — it was a carry attempt
+      if (mode === 'new' && this.stringLine && this._mlen(this.stringLine) < 0.02) this.stringLine = null;
       this.redraw();
       if (this.onStrokeEnd) this.onStrokeEnd();
       return;
@@ -2085,17 +2124,26 @@ window.ATELIER_REFS = [{"id": "ws-lines-1", "title": "Straight lines — set 1",
     const ux = dx / L, uy = dy / L;
     const ext = (this.cssW + this.cssH) * 2;
     ctx.save();
-    ctx.strokeStyle = 'rgba(42,107,138,0.85)'; ctx.lineWidth = 1.5; ctx.setLineDash([9, 6]);
+    // sight-line extensions beyond the grabbed span, dashed and faint
+    ctx.strokeStyle = 'rgba(42,107,138,0.55)'; ctx.lineWidth = 1.5; ctx.setLineDash([9, 6]);
     ctx.beginPath();
-    ctx.moveTo(a[0] - ux * ext, a[1] - uy * ext);
-    ctx.lineTo(a[0] + ux * ext, a[1] + uy * ext);
+    ctx.moveTo(a[0] - ux * ext, a[1] - uy * ext); ctx.lineTo(a[0], a[1]);
+    ctx.moveTo(b[0], b[1]); ctx.lineTo(b[0] + ux * ext, b[1] + uy * ext);
     ctx.stroke();
     ctx.setLineDash([]);
-    // angle readout (from horizontal, folded to ±90°)
+    // the string itself — the measured span, solid, with grab handles at the
+    // ends (drag the middle to carry it rigidly, an end to re-aim it)
+    ctx.strokeStyle = 'rgba(42,107,138,0.9)'; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.moveTo(a[0], a[1]); ctx.lineTo(b[0], b[1]); ctx.stroke();
+    ctx.fillStyle = 'rgba(42,107,138,1)';
+    for (const p of [a, b]) { ctx.beginPath(); ctx.arc(p[0], p[1], 4, 0, Math.PI * 2); ctx.fill(); }
+    // readout: angle from horizontal (folded to ±90°) + length as % of the
+    // panel side — panels are 1:1, so the same % means the same true length
     let deg = Math.atan2(dy, dx) * 180 / Math.PI;
     if (deg > 90) deg -= 180; if (deg <= -90) deg += 180;
-    const lab = Math.abs(deg) < 0.75 ? 'level' : deg.toFixed(1) + '°';
-    const mx = (a[0] + b[0]) / 2, my = (a[1] + b[1]) / 2 - 12;
+    const lenPct = Math.round(this._mlen(s) * 100);
+    const lab = (Math.abs(deg) < 0.75 ? 'level' : deg.toFixed(1) + '°') + ' · ' + lenPct + '%';
+    const mx = (a[0] + b[0]) / 2, my = (a[1] + b[1]) / 2 - 14;
     ctx.font = '600 12px ui-sans-serif, system-ui, -apple-system, sans-serif';
     const tw = ctx.measureText(lab).width + 8;
     ctx.fillStyle = 'rgba(255,255,255,0.9)'; ctx.fillRect(mx - tw / 2, my - 9, tw, 17);
@@ -2592,7 +2640,7 @@ window.ATELIER_REFS = [{"id": "ws-lines-1", "title": "Straight lines — set 1",
         how: 'Before the sweep, mark start, end, and where (and how far) it bows out. Draw through those points in one unhurried stroke rather than feeling your way along the edge.' },
       sight: { icon: '⇄', title: 'Trust the flick, not the stare',
         why: 'Sight-size works because the eye is superb at spotting a DIFFERENCE between two same-sized images and poor at measuring absolutes. Staring at your drawing alone tells you nothing; the information lives in the rapid comparison.',
-        how: 'Work in the rhythm: mark \u2192 flick eyes to the plate \u2192 correct. Step back before any big decision — at judging distance only the true errors survive. Lay the string across both panels when an angle or alignment is in doubt.' },
+        how: 'Work in the rhythm: mark \u2192 flick eyes to the plate \u2192 correct. Step back before any big decision — at judging distance only the true errors survive. When an angle or length is in doubt, stretch the string along it on the plate, then carry it \u2014 angle and length held \u2014 over your copy and see if the edge agrees.' },
       terminator: { icon: '◑', title: 'The terminator follows the form',
         why: 'The shadow line isn’t an outline you copy — it’s where the surface turns away from the light. Its position is set by the light direction; its curve is set by the form. Misplacing it flattens the volume instantly.',
         how: 'First ask: where does the light come from? The terminator sits roughly a quarter-turn around from it. Then let its bow follow the form’s roundness — straighter on a cylinder, fuller on a sphere. Place, then curve.' },
@@ -4977,7 +5025,7 @@ window.ATELIER_REFS = [{"id": "ws-lines-1", "title": "Straight lines — set 1",
     polygon: 'Fix each corner’s position relative to the others. Block the whole shape in, then check its proportion before committing.',
     envelope: 'Find the outer “envelope” first — the largest straight lines that contain the form — then facet into smaller straights and round to the true contour, noticing where the edge turns sharply versus flows. General to specific.',
     gesture: 'A figure is shown as its line of action — one flowing line through the whole pose, with the head and main masses. Memorise that line, then draw it from memory in a single sweep. It’s the rhythm you’re after, not the outline; push the curve a little.',
-    sightsize: 'The classical atelier setup: the plate sits beside your paper at the same size, and you copy it using pure eye comparison — mark, flick your eyes to the plate, correct. Step back often to judge the whole; lay the String across both panels to check an angle or alignment. Scoring is exact: placement, size and contour all count, and you can keep refining the same copy.',
+    sightsize: 'The classical atelier setup: the plate sits beside your paper at the same size, and you copy it using pure eye comparison — mark, flick your eyes to the plate, correct. Step back often to judge the whole. The String works like a taut string in your outstretched hands: stretch it along an edge on the plate to read its angle and length, then grab its middle and carry it — angle and length held — over your copy to compare. Grab an end to re-aim it. Scoring is exact: placement, size and contour all count, and you can keep refining the same copy.',
     contour: 'Trace one continuous edge slowly with your eyes, then draw it from memory in a single, unhurried line. It’s about seeing the edge, not speed.',
     negative: 'Ignore the object itself — memorise only the empty shapes around and between the forms, then draw those negative shapes.',
     bargue: 'Study only the straight-line block-in stage. Draw the outer envelope from memory, then fade the plate back over your drawing to see where you drifted.',
@@ -5318,7 +5366,7 @@ window.ATELIER_REFS = [{"id": "ws-lines-1", "title": "Straight lines — set 1",
           instr.textContent = needStep
             ? 'Step back — judge the whole before the next mark.'
             : (surface.stringMode
-              ? 'Drag the string across both panels — same angle on the plate and your copy?'
+              ? 'Stretch the string along an edge on the plate, then grab its middle to carry it — angle & length held — over your copy. Grab an end to re-aim it; tap empty space to clear.'
               : 'Copy the plate at the same size. Rhythm: mark → flick eyes to the plate → correct.');
           const stringBtn = `<button class="btn ghost sm ${surface.stringMode ? 'sel' : ''}" data-act="string">String</button>`;
           controls.innerHTML = `<button class="btn ghost sm" data-act="stepback">Step back</button>
@@ -6193,8 +6241,8 @@ window.ATELIER_REFS = [{"id": "ws-lines-1", "title": "Straight lines — set 1",
   'use strict';
   // Stamped by build/build.js: A.VERSION from build/version.json, A.BUILD from
   // the build clock (YYMMDD.HHMM). These literals are only the un-built dev fallback.
-  A.VERSION = '1.8.1';
-  A.BUILD = '260706.1424';
+  A.VERSION = '1.9.0';
+  A.BUILD = '260706.1443';
   function boot() {
     try { A.ui.init(); }
     catch (e) {

@@ -508,7 +508,7 @@
     polygon: 'Fix each corner’s position relative to the others. Block the whole shape in, then check its proportion before committing.',
     envelope: 'Find the outer “envelope” first — the largest straight lines that contain the form — then facet into smaller straights and round to the true contour, noticing where the edge turns sharply versus flows. General to specific.',
     gesture: 'A figure is shown as its line of action — one flowing line through the whole pose, with the head and main masses. Memorise that line, then draw it from memory in a single sweep. It’s the rhythm you’re after, not the outline; push the curve a little.',
-    sightsize: 'The classical atelier setup: the plate sits beside your paper at the same size, and you copy it using pure eye comparison — mark, flick your eyes to the plate, correct. Step back often to judge the whole; lay the String across both panels to check an angle or alignment. Scoring is exact: placement, size and contour all count, and you can keep refining the same copy.',
+    sightsize: 'The classical atelier setup: the plate sits beside your paper at the same size, and you copy it using pure eye comparison — mark, flick your eyes to the plate, correct. Step back often to judge the whole. The String works like a taut string in your outstretched hands: stretch it along an edge on the plate to read its angle and length, then grab its middle and carry it — angle and length held — over your copy to compare. Grab an end to re-aim it. Scoring is exact: placement, size and contour all count, and you can keep refining the same copy.',
     contour: 'Trace one continuous edge slowly with your eyes, then draw it from memory in a single, unhurried line. It’s about seeing the edge, not speed.',
     negative: 'Ignore the object itself — memorise only the empty shapes around and between the forms, then draw those negative shapes.',
     bargue: 'Study only the straight-line block-in stage. Draw the outer envelope from memory, then fade the plate back over your drawing to see where you drifted.',
@@ -849,7 +849,7 @@
           instr.textContent = needStep
             ? 'Step back — judge the whole before the next mark.'
             : (surface.stringMode
-              ? 'Drag the string across both panels — same angle on the plate and your copy?'
+              ? 'Stretch the string along an edge on the plate, then grab its middle to carry it — angle & length held — over your copy. Grab an end to re-aim it; tap empty space to clear.'
               : 'Copy the plate at the same size. Rhythm: mark → flick eyes to the plate → correct.');
           const stringBtn = `<button class="btn ghost sm ${surface.stringMode ? 'sel' : ''}" data-act="string">String</button>`;
           controls.innerHTML = `<button class="btn ghost sm" data-act="stepback">Step back</button>

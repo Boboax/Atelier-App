@@ -48,7 +48,8 @@ iPad with the Apple Pencil after each install. ✅ / ❌ / note.
 - [ ] Practice → Module 4 → **Sight-Size Copy** → pick a plate → **two side-by-side panels** appear, plate left, paper right, same size; drawing works only on the paper.
 - [ ] **Flick** flashes the plate over your drawing for a beat, then it fades — long enough to spot a difference, short enough not to trace from.
 - [ ] **Step back** zooms both panels out on a desk-tone surround; drawing is disabled; **tapping anywhere walks you back in** (and the Pencil doesn't leave a mark on that tap).
-- [ ] **String**: drag a line — it extends across BOTH panels with a live angle readout ("level" when near 0°); a tap clears it; toggling String off removes it. Normal drawing resumes after toggling off.
+- [ ] **String**: drag a line — the measured span is solid with dot handles, the sight-line extends dashed across BOTH panels, and the readout shows angle + length ("level · 42%" when near 0°).
+- [ ] **Carry the string** (new in 1.9.0): stretch it along an edge on the plate, then grab its **middle** and drag — it moves rigidly (angle & length locked, watch the readout not change) over to your copy. Grab an **end dot** — that end re-aims (angle/length change). A tap on **empty** canvas clears it; a tap **on** the string leaves it in place. Handles are comfortably grabbable with the Pencil at arm's length.
 - [ ] After ~a dozen marks without stepping back, the instructor nudges **"Step back — judge the whole"**; stepping back resets it.
 - [ ] **Score ›** goes through the usual estimate step, then shows contour match + **placement ←→/↕ + size** with directions that match what you see (drew it too low → says "too low").
 - [ ] **Refine the copy ›** returns to the same drawing (marks kept) for another pass; Done closes.

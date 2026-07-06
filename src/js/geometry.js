@@ -18,6 +18,16 @@
 
   geom.dist = (a, b) => Math.hypot(a[0] - b[0], a[1] - b[1]);
 
+  // shortest distance from point p to the SEGMENT a-b (not the infinite line)
+  geom.distToSeg = function (p, a, b) {
+    const vx = b[0] - a[0], vy = b[1] - a[1];
+    const L2 = vx * vx + vy * vy;
+    if (L2 < 1e-12) return geom.dist(p, a);
+    let t = ((p[0] - a[0]) * vx + (p[1] - a[1]) * vy) / L2;
+    t = Math.max(0, Math.min(1, t));
+    return Math.hypot(p[0] - (a[0] + t * vx), p[1] - (a[1] + t * vy));
+  };
+
   // Total arc length of a polyline.
   geom.pathLength = function (pts) {
     let L = 0;

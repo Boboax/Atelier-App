@@ -285,8 +285,23 @@
       e.preventDefault();
       this._capture(e);
       this._activeId = e.pointerId;
-      this._stringing = true;
-      const p = this._design(e); this.stringLine = { a: p, b: p };
+      const p = this._design(e);
+      // grab the EXISTING string to work with it — the two-outstretched-hands
+      // gesture: mid-grab carries it rigidly (angle & length held) from the
+      // plate to the copy; an end-grab re-aims/re-lengths that end.
+      const s = this.stringLine;
+      const grab = !s ? null
+        : A.geom.dist(p, s.a) < 0.045 ? 'a'
+        : A.geom.dist(p, s.b) < 0.045 ? 'b'
+        : A.geom.distToSeg(p, s.a, s.b) < 0.03 ? 'move' : null;
+      if (grab) {
+        this._stringing = grab;
+        this._stringGrab = p;
+        this._stringOrig = { a: s.a.slice(), b: s.b.slice() };
+      } else {
+        this._stringing = 'new';
+        this.stringLine = { a: p, b: p };
+      }
       this.redraw();
       return;
     }
@@ -338,7 +353,18 @@
       if (this._pinch) { e.preventDefault(); this._doPinch(); return; }
     }
     if (this._activeId != null && e.pointerId !== this._activeId) return;
-    if (this._stringing) { e.preventDefault(); this.stringLine.b = this._design(e); this._scheduleFull(); return; }
+    if (this._stringing) {
+      e.preventDefault();
+      const p = this._design(e), s = this.stringLine;
+      if (this._stringing === 'new' || this._stringing === 'b') s.b = p;
+      else if (this._stringing === 'a') s.a = p;
+      else {           // 'move': translate rigidly — angle & length stay locked
+        const dx = p[0] - this._stringGrab[0], dy = p[1] - this._stringGrab[1];
+        s.a = [this._stringOrig.a[0] + dx, this._stringOrig.a[1] + dy];
+        s.b = [this._stringOrig.b[0] + dx, this._stringOrig.b[1] + dy];
+      }
+      this._scheduleFull(); return;
+    }
     if (this._measuring) { e.preventDefault(); this._curMeasure.b = this._design(e); this._scheduleFull(); return; }
     if (this._cropping) { e.preventDefault(); this.cropRect[1] = this._design(e); this._scheduleFull(); return; }
     if (this._erasingActive) {
@@ -382,8 +408,11 @@
     try { if (e && e.pointerId != null && this.canvas.releasePointerCapture) this.canvas.releasePointerCapture(e.pointerId); } catch (_) {}
     this._activeId = null;
     if (this._stringing) {
-      this._stringing = false;
-      if (this.stringLine && this._mlen({ a: this.stringLine.a, b: this.stringLine.b }) < 0.02) this.stringLine = null;   // a tap clears it
+      const mode = this._stringing;
+      this._stringing = false; this._stringGrab = null; this._stringOrig = null;
+      // a tap on EMPTY canvas clears the string; a tap ON the string (a grab
+      // that didn't move) leaves it in place — it was a carry attempt
+      if (mode === 'new' && this.stringLine && this._mlen(this.stringLine) < 0.02) this.stringLine = null;
       this.redraw();
       if (this.onStrokeEnd) this.onStrokeEnd();
       return;
@@ -677,17 +706,26 @@
     const ux = dx / L, uy = dy / L;
     const ext = (this.cssW + this.cssH) * 2;
     ctx.save();
-    ctx.strokeStyle = 'rgba(42,107,138,0.85)'; ctx.lineWidth = 1.5; ctx.setLineDash([9, 6]);
+    // sight-line extensions beyond the grabbed span, dashed and faint
+    ctx.strokeStyle = 'rgba(42,107,138,0.55)'; ctx.lineWidth = 1.5; ctx.setLineDash([9, 6]);
     ctx.beginPath();
-    ctx.moveTo(a[0] - ux * ext, a[1] - uy * ext);
-    ctx.lineTo(a[0] + ux * ext, a[1] + uy * ext);
+    ctx.moveTo(a[0] - ux * ext, a[1] - uy * ext); ctx.lineTo(a[0], a[1]);
+    ctx.moveTo(b[0], b[1]); ctx.lineTo(b[0] + ux * ext, b[1] + uy * ext);
     ctx.stroke();
     ctx.setLineDash([]);
-    // angle readout (from horizontal, folded to ±90°)
+    // the string itself — the measured span, solid, with grab handles at the
+    // ends (drag the middle to carry it rigidly, an end to re-aim it)
+    ctx.strokeStyle = 'rgba(42,107,138,0.9)'; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.moveTo(a[0], a[1]); ctx.lineTo(b[0], b[1]); ctx.stroke();
+    ctx.fillStyle = 'rgba(42,107,138,1)';
+    for (const p of [a, b]) { ctx.beginPath(); ctx.arc(p[0], p[1], 4, 0, Math.PI * 2); ctx.fill(); }
+    // readout: angle from horizontal (folded to ±90°) + length as % of the
+    // panel side — panels are 1:1, so the same % means the same true length
     let deg = Math.atan2(dy, dx) * 180 / Math.PI;
     if (deg > 90) deg -= 180; if (deg <= -90) deg += 180;
-    const lab = Math.abs(deg) < 0.75 ? 'level' : deg.toFixed(1) + '°';
-    const mx = (a[0] + b[0]) / 2, my = (a[1] + b[1]) / 2 - 12;
+    const lenPct = Math.round(this._mlen(s) * 100);
+    const lab = (Math.abs(deg) < 0.75 ? 'level' : deg.toFixed(1) + '°') + ' · ' + lenPct + '%';
+    const mx = (a[0] + b[0]) / 2, my = (a[1] + b[1]) / 2 - 14;
     ctx.font = '600 12px ui-sans-serif, system-ui, -apple-system, sans-serif';
     const tw = ctx.measureText(lab).width + 8;
     ctx.fillStyle = 'rgba(255,255,255,0.9)'; ctx.fillRect(mx - tw / 2, my - 9, tw, 17);

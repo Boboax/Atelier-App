@@ -90,7 +90,7 @@
         how: 'Before the sweep, mark start, end, and where (and how far) it bows out. Draw through those points in one unhurried stroke rather than feeling your way along the edge.' },
       sight: { icon: '⇄', title: 'Trust the flick, not the stare',
         why: 'Sight-size works because the eye is superb at spotting a DIFFERENCE between two same-sized images and poor at measuring absolutes. Staring at your drawing alone tells you nothing; the information lives in the rapid comparison.',
-        how: 'Work in the rhythm: mark \u2192 flick eyes to the plate \u2192 correct. Step back before any big decision — at judging distance only the true errors survive. Lay the string across both panels when an angle or alignment is in doubt.' },
+        how: 'Work in the rhythm: mark \u2192 flick eyes to the plate \u2192 correct. Step back before any big decision — at judging distance only the true errors survive. When an angle or length is in doubt, stretch the string along it on the plate, then carry it \u2014 angle and length held \u2014 over your copy and see if the edge agrees.' },
       terminator: { icon: '◑', title: 'The terminator follows the form',
         why: 'The shadow line isn’t an outline you copy — it’s where the surface turns away from the light. Its position is set by the light direction; its curve is set by the form. Misplacing it flattens the volume instantly.',
         how: 'First ask: where does the light come from? The terminator sits roughly a quarter-turn around from it. Then let its bow follow the form’s roundness — straighter on a cylinder, fuller on a sphere. Place, then curve.' },
