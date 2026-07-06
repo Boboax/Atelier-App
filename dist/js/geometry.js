@@ -124,9 +124,12 @@
     const uLen = geom.dist(u0, u1);
     const lenErrPct = tLen ? (uLen - tLen) / tLen * 100 : 0;
 
-    const angleScore = Math.max(0, 100 - Math.abs(aErr) * 3);     // 33° off → 0
-    const lengthScore = Math.max(0, 100 - Math.abs(lenErrPct) * 1.2); // 83% off → 0
-    const score = Math.round(angleScore * 0.6 + lengthScore * 0.4);
+    const angleScore = Math.max(0, 100 - Math.abs(aErr) * 3);     // 33° off → 0 (kept for display)
+    const lengthScore = Math.max(0, 100 - Math.abs(lenErrPct) * 1.2);
+    // Additive penalty, not a weighted blend: a badly wrong ANGLE is a failed
+    // line and must score low even if the length happens to match (the old blend
+    // let a perpendicular line score 40 on length alone). ~45° off → 0.
+    const score = Math.round(Math.max(0, 100 - Math.abs(aErr) * 2.2 - Math.abs(lenErrPct) * 0.5));
     return {
       score,
       angleErr: +aErr.toFixed(2),          // signed deg (+ = clockwise on screen)
@@ -356,8 +359,11 @@
     const d2 = meanNearest(nt.pts, nu.pts);   // coverage: whole outline covered
     let chamfer = (d1 + d2) / 2;              // normalised units (bbox diagonal = 1)
     if (chamfer < 0.004) chamfer = 0;         // sampling noise — a perfect copy scores 100
-    const sim = Math.max(0, 1 - chamfer * 4.2);                          // ~IoU-like, for display/coach
-    const score = Math.round(Math.max(0, Math.min(100, 100 - chamfer * 340)));
+    // Stricter multiplier (was 340, far too lenient — a circle scored 84 against a
+    // square and a tiny scribble 56). At 700 a clean hand-drawn copy still scores
+    // ~90 while a genuinely wrong contour lands where it should.
+    const score = Math.round(Math.max(0, Math.min(100, 100 - chamfer * 700)));
+    const sim = score / 100;                  // display/coach consistent with the score
     const aspectErrPct = nt.aspect ? (nu.aspect - nt.aspect) / nt.aspect * 100 : 0;
     return {
       score,
@@ -372,21 +378,41 @@
      Like shape scoring but for an OPEN polyline — match the path of the curve
      (its bend/apex) rather than an enclosed area. Symmetric Chamfer, bbox-
      normalised, so size/position don't matter.                              */
+  // Similarity transform mapping P's endpoints onto Q's (translate+rotate+scale).
+  function endpointAlign(P, Q) {
+    const p0 = P[0], pn = P[P.length - 1], q0 = Q[0], qn = Q[Q.length - 1];
+    const vpx = pn[0] - p0[0], vpy = pn[1] - p0[1];
+    const vqx = qn[0] - q0[0], vqy = qn[1] - q0[1];
+    const lp = Math.hypot(vpx, vpy) || 1e-6, lq = Math.hypot(vqx, vqy);
+    const s = lq / lp, ang = Math.atan2(vqy, vqx) - Math.atan2(vpy, vpx);
+    const c = Math.cos(ang) * s, sn = Math.sin(ang) * s;
+    return P.map((p) => { const dx = p[0] - p0[0], dy = p[1] - p0[1]; return [q0[0] + c * dx - sn * dy, q0[1] + sn * dx + c * dy]; });
+  }
+  // Score an OPEN curve / line of action by how faithfully its BOW matches the
+  // target between the same endpoints. We align endpoints (so position, size and
+  // orientation don't matter — a memory drawing may be bigger or shifted), resolve
+  // draw direction by gross flow, then measure ordered point-to-point deviation
+  // normalized by the chord. This correctly penalises a too-straight line, a bow
+  // in the wrong place, or an opposite bend — which bbox+nearest-point scoring
+  // let slide (a straight line used to score ~97 against an S-curve).
   geom.scoreCurve = function (targetPolyline, userPts) {
     if (!userPts || userPts.length < 2 || extentOf(userPts) < MIN_EXTENT) {
       return { score: 0, iou: 0, metrics: { degenerate: true } };
     }
-    const T = geom.resample(targetPolyline, 80);
-    let U;
-    if (userPts.length < 40) U = geom.resample(userPts, 80);
-    else { const step = Math.ceil(userPts.length / 200); U = userPts.filter((_, i) => i % step === 0); }
-    const nt = geom.normalizeShape(T), nu = geom.normalizeShape(U);
-    const d1 = meanNearest(nu.pts, nt.pts), d2 = meanNearest(nt.pts, nu.pts);
-    let chamfer = (d1 + d2) / 2;
-    if (chamfer < 0.004) chamfer = 0;         // sampling noise — a perfect copy scores 100
-    const sim = Math.max(0, 1 - chamfer * 4.2);
-    const score = Math.round(Math.max(0, Math.min(100, 100 - chamfer * 340)));
-    return { score, iou: +sim.toFixed(3), metrics: { iou: +sim.toFixed(3), chamfer: +chamfer.toFixed(4) } };
+    const N = 64;
+    const T = geom.resample(targetPolyline, N);
+    let U = geom.resample(userPts, N);
+    const tvx = T[N - 1][0] - T[0][0], tvy = T[N - 1][1] - T[0][1];
+    const uvx = U[N - 1][0] - U[0][0], uvy = U[N - 1][1] - U[0][1];
+    if (tvx * uvx + tvy * uvy < 0) U = U.slice().reverse();   // drawn the other way → flip
+    const bb = bbox(T);
+    const scale = Math.max(Math.hypot(tvx, tvy), 0.45 * Math.hypot(bb.w, bb.h), 1e-3);
+    const A = endpointAlign(U, T);
+    let s = 0; for (let i = 0; i < N; i++) s += Math.hypot(A[i][0] - T[i][0], A[i][1] - T[i][1]);
+    const dev = s / N / scale;
+    const score = Math.round(Math.max(0, Math.min(100, 100 - dev * 500)));
+    const iou = +(score / 100).toFixed(3);   // 0-1 similarity for coach thresholds
+    return { score, iou, metrics: { iou, dev: +dev.toFixed(4) } };
   };
 
   /* ---- Convex hull (used by generators & for cleaning user polygons) ----- */

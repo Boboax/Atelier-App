@@ -54,6 +54,45 @@ test('rdp: 10x+ decimation, endpoints kept', () => {
   assert.deepEqual(slim[slim.length - 1], dense[dense.length - 1]);
 });
 
+test('line scoring: a wrong angle is not rescued by matching length', () => {
+  const g = load().geom;
+  const T = [[0.2, 0.5], [0.8, 0.5]];
+  assert.equal(g.scoreLine(T, [[0.2, 0.5], [0.8, 0.5]]).score, 100);
+  assert.equal(g.scoreLine(T, [[0.5, 0.2], [0.5, 0.8]]).score, 0, 'perpendicular, same length must be ~0 not 40');
+  assert.ok(g.scoreLine(T, [[0.2, 0.5], [0.79, 0.6]]).score >= 72, 'a ~10deg miss stays high');
+  assert.ok(g.scoreLine(T, [[0.2, 0.5], [0.76, 0.7]]).score < 65, 'a ~20deg miss is clearly penalised');
+});
+
+test('shape scoring is strict enough to distinguish wrong contours', () => {
+  const g = load().geom;
+  const sq = [[0.3, 0.3], [0.7, 0.3], [0.7, 0.7], [0.3, 0.7]];
+  const circle = Array.from({ length: 24 }, (_, i) => { const a = i / 24 * 6.283; return [0.5 + 0.22 * Math.cos(a), 0.5 + 0.22 * Math.sin(a)]; });
+  const scribble = [[0.5, 0.5], [0.52, 0.51], [0.51, 0.53]];
+  assert.equal(g.scoreShape(sq, sq.map((p) => p.slice())).score, 100);
+  assert.ok(g.scoreShape(sq, sq.map((p) => [p[0] + 0.02, p[1] - 0.02])).score >= 88, 'a clean copy stays high');
+  assert.ok(g.scoreShape(sq, circle).score < 75, 'a circle is clearly not a square: ' + g.scoreShape(sq, circle).score);
+  assert.ok(g.scoreShape(sq, scribble).score < 25, 'a tiny scribble scores low: ' + g.scoreShape(sq, scribble).score);
+});
+
+test('curve scoring rewards the bow, not bbox overlap (no more straight-line-scores-97)', () => {
+  const g = load().geom;
+  // a strongly bowed S line of action
+  const T = [[0.5, 0.08], [0.6, 0.28], [0.44, 0.5], [0.58, 0.72], [0.5, 0.92]];
+  const good = [[0.5, 0.08], [0.585, 0.29], [0.45, 0.5], [0.565, 0.71], [0.5, 0.92]];
+  const straight = [[0.5, 0.08], [0.5, 0.3], [0.5, 0.5], [0.5, 0.7], [0.5, 0.92]];
+  const opposite = [[0.5, 0.08], [0.4, 0.28], [0.56, 0.5], [0.42, 0.72], [0.5, 0.92]];
+  const shifted = good.map((p) => [p[0] + 0.12, p[1] - 0.06]);
+  const reversed = good.slice().reverse();
+  const sc = (u) => g.scoreCurve(T, u).score;
+  assert.equal(sc(T), 100, 'identical = 100');
+  assert.ok(sc(good) >= 90, 'a close copy still scores high: ' + sc(good));
+  assert.ok(sc(shifted) >= 88, 'position/scale invariant: ' + sc(shifted));
+  assert.ok(sc(reversed) >= 88, 'draw-direction invariant: ' + sc(reversed));
+  assert.ok(sc(straight) < 82, 'a straight line must NOT score like the S: ' + sc(straight));
+  assert.ok(sc(opposite) < 65, 'an opposite bend must score poorly: ' + sc(opposite));
+  assert.ok(sc(good) - sc(straight) >= 12, 'good clearly beats straight');
+});
+
 test('gesture: authored poses valid across levels; line of action scores by curve match', () => {
   const A = load();
   const g = A.geom, gen = A.gen;

@@ -19,6 +19,25 @@ No feature reaches `main` without a version bump.
 
 ---
 
+## 1.6.0 — Scoring re-audit, real-subject scoring, drawing feel & teaching
+
+**Scoring (a full adversarial re-audit of every exercise — several were too generous)**
+- **Curve & gesture**: a straight line scored ~97 against an S-curve, an opposite bend ~86. Rewrote to align endpoints and measure the actual bow along the path (position/size/direction-invariant): close copy ~95, loose ~85, too-straight ~75, opposite bend ~50.
+- **Lines**: a perpendicular line (90° wrong) scored 40, rescued by matching length. Now an additive-penalty model — a badly wrong angle scores ~0 regardless of length.
+- **Shapes**: a circle scored 84 against a square and a tiny scribble 56. Tightened the contour metric — a clean copy still ~90, but a circle ~67, a scribble ~9.
+- Gesture reveal no longer shows "Proportion error undefined%" — it reports "Line-of-action match".
+- Calibration guard tests added for every scorer so this can't silently regress again.
+
+**Real subjects — objective scoring for the plates**
+- New **edge/contour scorer**: a Bargue block-in is thin lines, not a filled silhouette, so it's now scored by how closely your marks follow the plate's lines (position/size-invariant, precision-weighted). Auto-selected when the reference is line-art; filled photos still use silhouette overlap. The block-in drills are no longer self-check-only.
+
+**Drawing feel**
+- **Line smoothing** — a positional stabiliser eases hand jitter so straight and curved strokes come out cleaner. Adjustable in Settings (Off / Light / Medium / Strong; Medium default).
+
+**Teaching & clarity**
+- The teaching principle now shows its **title inline at the reveal** (no click needed); tapping expands the full why + how.
+- Reveal shows where the score sits vs the ~85% level-up mark, flags the level-credit cost of glances **on the Glance button** (−5), and prompts a Redraw with its rationale when a drawing was genuinely off (Lecoq's correct-and-repeat).
+
 ## 1.5.0 — Gesture, teaching & real subjects
 
 **New**
