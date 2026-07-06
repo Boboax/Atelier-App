@@ -96,6 +96,30 @@ test('never-practised scored drills report due now', () => {
   assert.equal(A.curr.dueIn('polygon', '2026-01-01'), 0);
 });
 
+test('Module 4 ladder: five scores >=80 promote a reference drill and shrink its study glance', () => {
+  const { A } = freshEnv(LOGIC);
+  const d = A.curr.def('bargue');
+  assert.equal(d.maxLevel, 3, 'reference drills carry a 3-level ladder');
+  const s1 = d.study(1);
+  for (let i = 0; i < 5; i++) A.curr.touchRef('bargue', '2026-01-0' + (i + 1), 85);
+  assert.equal(A.curr.level('bargue'), 2, 'a full window averaging >=80 promotes');
+  assert.ok(d.study(2) < s1, 'level 2 tightens the study clock (×0.7)');
+  assert.ok(d.study(3) < d.study(2), 'level 3 tighter still (×0.5)');
+  // the window cleared on promotion → five MORE strong scores reach the cap and stop
+  for (let i = 0; i < 5; i++) A.curr.touchRef('bargue', '2026-01-1' + i, 90);
+  assert.equal(A.curr.level('bargue'), 3);
+  for (let i = 0; i < 5; i++) A.curr.touchRef('bargue', '2026-01-2' + i, 95);
+  assert.equal(A.curr.level('bargue'), 3, 'never past maxLevel');
+});
+
+test('Module 4 ladder: a sub-80 window does not promote; sight-size stays flat', () => {
+  const { A } = freshEnv(LOGIC);
+  for (let i = 0; i < 5; i++) A.curr.touchRef('bargue', '2026-01-0' + (i + 1), 75);
+  assert.equal(A.curr.level('bargue'), 1, 'mean 75 must not promote');
+  for (let i = 0; i < 5; i++) A.curr.touchRef('sightsize', '2026-01-0' + (i + 1), 95);
+  assert.equal(A.curr.level('sightsize'), 1, 'sightsize has no ladder (maxLevel 1)');
+});
+
 test('reference drills join the schedule via touchRef', () => {
   const { A } = freshEnv(LOGIC);
   assert.equal(A.curr.dueRefs('2026-01-01').length, 0, 'untried refs are not due');

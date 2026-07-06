@@ -124,7 +124,7 @@
         btn: 'Warm up' };
     }
     if (sv) return { step: 'resume', exKey: '', title: 'Resume ' + (sv.kind === 'warmup' ? 'quick session' : 'mixed session'), sub: sv.completed + '/' + sv.queue.length + ' done today', btn: 'Resume' };
-    const btns = { warmup: 'Warm up', mixed: 'Start', resume: 'Resume', reference: 'Try', build: 'Practice', recall: 'Test me' };
+    const btns = { warmup: 'Warm up', mixed: 'Start', resume: 'Resume', reference: 'Try', build: 'Practice', recall: 'Test me', correction: 'Fix it' };
     return { step: r.step, exKey: r.exKey || '', title: r.title, sub: r.sub, btn: btns[r.step] || 'Practice' };
   }
   // slim one-line recommendation — used at the top of the Exercises menu
@@ -150,6 +150,7 @@
   function doRec(step, exKey) {
     if (step === 'warmup') startWarmup();
     else if (step === 'build' || step === 'reference') startExercise(exKey);
+    else if (step === 'correction') startCorrection(exKey);
     else if (step === 'recall') startRecall();
     else if (step === 'resume') resumeSession();
     else if (step === 'mixed') { const sv = savedSession(); if (sv && sv.kind === 'mixed') resumeSession(); else startSession('mixed'); }
@@ -416,9 +417,12 @@
       const exs = A.curr.EXERCISES.filter((e) => e.module === m.n);
       const rows = exs.map((e) => {
         // sight-size is a reference drill but objectively scored, and has no study
-        // timer — the plate stays in view the whole time
+        // timer — the plate stays in view the whole time. Other reference drills
+        // show their Module 4 ladder rung: the level's only effect is the
+        // shrinking study glance, so surface both together.
         const lvl = e.scored ? `Lv ${A.curr.level(e.key)} · ${A.curr.studySeconds(e.key)}s study`
-          : e.key === 'sightsize' ? 'unhurried · exact score' : `${e.study()}s study`;
+          : e.key === 'sightsize' ? 'unhurried · exact score'
+          : `${(e.maxLevel || 1) > 1 ? `Lv ${A.curr.level(e.key)} · ` : ''}${e.study(A.curr.level(e.key))}s study`;
         const tag = (e.scored || e.key === 'sightsize') ? '<span class="tag">scored</span>' : '<span class="tag self">self-check</span>';
         return `<div class="exrow" data-ex="${e.key}">
           <div class="meta"><div class="nm">${esc(e.name)} ${tag}</div>
@@ -501,6 +505,25 @@
     chooseReference(exKey, def, items);
   }
 
+  // ERROR-SPECIFIC CORRECTION SET: 5 figures of one drill, generated under a
+  // "stress" that concentrates targets where the measured bias lives (see
+  // gamify.biasReport / generators stress param). Deliberately BLOCKED — no
+  // interleaved queue: this is remedial part-practice of one diagnosed fault,
+  // the case where focused repetition with immediate feedback beats mixing.
+  // The pre-run bias is kept on the run so the finish modal can show
+  // before → after (feedback on the FAULT, not just the score).
+  async function startCorrection(exKey) {
+    const all = await attempts();
+    const bias = A.game.biasReport(all);
+    // the bias can have healed (or shifted) since the card was rendered —
+    // recompute rather than trust a stale button, and fall back gracefully
+    if (!bias) { if (exKey) startExercise(exKey); else ui.go('practice'); return; }
+    session = null;
+    run = { exKey: bias.exKey, size: RUN_SIZE, done: 0, results: [], start: performance.now(), queue: null,
+            correction: { kind: bias.kind, sign: bias.sign, pre: bias.mean, label: bias.label } };
+    openDrill(bias.exKey, null, { stress: { kind: bias.kind, sign: bias.sign } });
+  }
+
   async function chooseReference(exKey, def, items) {
     const isBargue = exKey === 'bargue';
     // every reference drill shows per-image progress (best % + stars) — the
@@ -536,12 +559,13 @@
       const skip = e.target.closest('[data-skip]');
       const lib = e.target.closest('[data-go]');
       if (lib) { closeModal(); ui.go('library'); return; }
-      if (skip) { closeModal(); openDrill(exKey, { id: null, title: 'Physical object', img: null, studySec: def.study() }); return; }
+      if (skip) { closeModal(); openDrill(exKey, { id: null, title: 'Physical object', img: null, studySec: def.study(A.curr.level(exKey)) }); return; }
       if (c) {
         const item = A.library.get(c.dataset.ref);
         closeModal();
         const img = await A.library.image(item);
-        openDrill(exKey, Object.assign({}, item, { img, studySec: def.study() }));
+        // pass the Module 4 ladder level — a promoted drill studies on a shorter clock
+        openDrill(exKey, Object.assign({}, item, { img, studySec: def.study(A.curr.level(exKey)) }));
       }
     });
   }
@@ -700,7 +724,9 @@
     if (session) {
       if (d.def.scored) { session.results.push({ type: d.exKey, score: d.result.score, finisher: !!d.result.finisher }); session.completed++; saveSession(); }
     } else if (run && d.def.scored) {
-      run.results.push({ type: d.exKey, score: d.result.score }); run.done++;
+      // metrics kept per figure so a correction run can report its own mean
+      // signed bias at the finish (before → after)
+      run.results.push({ type: d.exKey, score: d.result.score, metrics: d.result.metrics }); run.done++;
     }
     fatigueCheck();
   }
@@ -793,6 +819,23 @@
     const lvl = exKey ? A.curr.level(exKey) : 1;
     run = null;
     drill.stop(); $('#drill').classList.remove('on'); invalidate();
+    // correction set: close the loop — the diagnosed bias vs what THIS set
+    // measured. Feedback about the fault itself (not just the score) is what
+    // makes deliberate practice deliberate; one line, signed, same units.
+    let corrLine = '';
+    if (r.correction && res.length) {
+      const kind = r.correction.kind;
+      const pickV = (m) => kind === 'angle' ? (m.angleErrDeg != null ? m.angleErrDeg : m.meanAngleErrDeg)
+        : kind === 'length' ? (m.lengthErrPct != null ? m.lengthErrPct : m.meanLengthErrPct)
+        : m.aspectErrPct;
+      const xs = res.map((x) => x.metrics && pickV(x.metrics)).filter((v) => v != null);
+      if (xs.length) {
+        const post = xs.reduce((a, b) => a + b, 0) / xs.length;
+        const u = kind === 'angle' ? '°' : '%';
+        const f = (v) => (v > 0 ? '+' : '') + (+v).toFixed(1) + u;
+        corrLine = `<div class="insight" style="text-align:left">Correction set (${esc(r.correction.label)}): ${f(r.correction.pre)} before → <b>${f(post)}</b> across this set.</div>`;
+      }
+    }
     const head = mean >= 85 ? 'Excellent — set complete' : mean >= 65 ? 'Well done — set complete' : 'Set complete — keep going';
     attempts(true).then((atts) => {
       const rec = A.game.recommend(atts);
@@ -806,6 +849,7 @@
           <div class="k"><div class="v">${mean}</div><div class="l">mean</div></div>
           <div class="k"><div class="v">${best}</div><div class="l">best</div></div>
           <div class="k"><div class="v">${clock(secs)}</div><div class="l">time</div></div></div>
+        ${corrLine}
         <div class="insight" style="text-align:left">Recommended next: <b>${esc(rec.title)}</b> — ${esc(rec.sub)}</div>
         ${recBtn}${againBtn}
         <button class="btn ghost block" data-done="1" style="margin-top:8px">Back to home</button>`);

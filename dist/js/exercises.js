@@ -79,6 +79,11 @@
     // level promotion (the boost would poison the window) but fully scored.
     this.isFinisher = !!opts.finisher;
     if (this.isFinisher) this.level = Math.min(this.def.maxLevel || 9, this.level + 1);
+    // correction-set stress ({kind, sign} from gamify.biasReport): threaded to
+    // the generator so targets concentrate where the measured bias lives. Kept
+    // on the instance because next() regenerates targets for the rest of the
+    // run; a plain startExercise (no opts.stress) clears it.
+    this.stress = opts.stress || null;
     this.result = null; this.pending = null; this.sessionIndex = 0;
     this.isRepeat = false; this.isRecall = false;
     this.glanceCount = 0; this.glanceCap = 3;
@@ -118,7 +123,7 @@
 
   Drill.prototype._newTargetGeom = function () {
     if (this.def.scored) {
-      this.target = A.gen.make(this.exKey, this.level);
+      this.target = A.gen.make(this.exKey, this.level, this.stress || undefined);
       this.surface.setTarget(this.target);
       this.surface.setGhost(null);
     } else {
@@ -153,8 +158,10 @@
     // for learners who find the adaptive defaults rushed — the science stays the
     // same (glances still shrink with level), just on a gentler clock
     const pace = A.store.get('pace', 'standard') === 'relaxed' ? 1.5 : 1;
+    // reference drills pass the level: the Module 4 ladder's whole progression
+    // IS the shrinking study glance (see curriculum EXERCISES)
     this.studyCap = Math.round((this.def.scored ? A.curr.studySeconds(this.exKey)
-                                    : (this.ref && this.ref.studySec) || this.def.study()) * pace);
+                                    : (this.ref && this.ref.studySec) || this.def.study(this.level)) * pace);
     this.studySec = this.studyCap;
     this.studyRemaining = this.studyCap;
     this.studyElapsed = 0;
@@ -438,7 +445,7 @@
     A.store.addAttempt(att);
     if (this.isRecall && this.def.scored) A.curr.noteRecall(this.exKey, score, att.day);
     A.habit.touch((this.studySec || 0) + (this.drawSec || 0));
-    if (!this.def.scored && !this.isRepeat) A.curr.touchRef(this.exKey, att.day);   // spaced review for plates
+    if (!this.def.scored && !this.isRepeat) A.curr.touchRef(this.exKey, att.day, score);   // spaced review + Module 4 ladder
     if (this.exKey === 'bargue' && att.refId) A.game.notePlate(att.refId, score);   // plate-course best
     this.lastAttempt = att;
   };
@@ -489,6 +496,7 @@
     this.level = A.curr.level(exKey);
     this.result = null; this.pending = null; this.sessionIndex = 0;
     this.isRepeat = false; this.isRecall = true; this.isFinisher = false;
+    this.stress = null;                            // a recall is never a correction figure
     this.glanceCount = 0; this.glanceCap = 0;      // no peeking — it's a test
     this.avgLook = 0;
     this.ref = null;

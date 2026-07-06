@@ -152,6 +152,63 @@
     return worst ? { exKey: worst, mean: Math.round(worstMean) } : null;
   }
 
+  /* ---- error-specific correction sets (deliberate practice) ----------------
+     Every scored attempt already records SIGNED error metrics (angle lean,
+     length over/undershoot, aspect squash/stretch) — but until now they were
+     only displayed, never used to design practice. Deliberate practice
+     (Ericsson) is precisely tasks built around the individual's MEASURED
+     weakness, so: when a signed bias is consistent enough to be a habit
+     rather than trial-to-trial noise, we surface a correction set aimed at it.
+     The window is short (last ~10 genuine attempts per drill family) for the
+     same reason stats.bias uses a recent window — a lean fixed weeks ago must
+     not keep prescribing counter-drills; this describes the eye you have NOW. */
+  const BIAS_WIN = 10, BIAS_MIN_N = 6;
+  // actionable thresholds sit above normal scatter: individual line attempts
+  // routinely miss by a few degrees / percent either way — only a MEAN that
+  // survives averaging 6+ trials is a systematic habit worth its own drill
+  const BIAS_THRESH = { angle: 2.5, length: 6, aspect: 6 };
+  function biasReport(attempts) {
+    // genuine memory trials only — repeats saw the answer, recalls are cold
+    // tests, finishers run a level up; none measures the everyday eye
+    const genuine = (attempts || []).filter((a) => a.scored && !a.repeat && !a.recall && !a.finisher && a.metrics);
+    const fam = (types) => genuine.filter((a) => types.indexOf(a.type) >= 0).slice(-BIAS_WIN);
+    const lines = fam(['line', 'angles']);      // share angle + length metrics
+    const shapes = fam(['polygon', 'envelope']); // share the aspect metric
+    // keep each sample's source type so the set targets the drill that
+    // actually produced the evidence, not a hardcoded representative
+    const collect = (rows, keyA, keyB) => rows
+      .map((a) => { const v = a.metrics[keyA] != null ? a.metrics[keyA] : (keyB ? a.metrics[keyB] : null); return v == null ? null : { v, type: a.type }; })
+      .filter(Boolean);
+    const LABEL = {
+      angle: (m) => m > 0 ? 'clockwise lean' : 'counter-clockwise lean',
+      length: (m) => m > 0 ? 'lines run long' : 'lines run short',
+      aspect: (m) => m > 0 ? 'shapes come out wide' : 'shapes come out tall'
+    };
+    const cands = [
+      { kind: 'angle', xs: collect(lines, 'angleErrDeg', 'meanAngleErrDeg') },
+      { kind: 'length', xs: collect(lines, 'lengthErrPct', 'meanLengthErrPct') },
+      { kind: 'aspect', xs: collect(shapes, 'aspectErrPct') }
+    ];
+    let best = null, bestStrength = 0;
+    for (const c of cands) {
+      if (c.xs.length < BIAS_MIN_N) continue;
+      const m = mean(c.xs.map((x) => x.v));
+      // strength normalised by each kind's threshold so a 15% aspect squash
+      // can outrank a 3° lean — units aren't comparable raw
+      const strength = Math.abs(m) / BIAS_THRESH[c.kind];
+      if (strength < 1) continue;                 // within normal scatter
+      if (strength > bestStrength) {
+        const byType = {};
+        c.xs.forEach((x) => { byType[x.type] = (byType[x.type] || 0) + 1; });
+        const exKey = Object.keys(byType).sort((a, b) => byType[b] - byType[a])[0];
+        best = { kind: c.kind, exKey, mean: +m.toFixed(1), n: c.xs.length,
+                 sign: m > 0 ? 1 : -1, label: LABEL[c.kind](m) };
+        bestStrength = strength;
+      }
+    }
+    return best;
+  }
+
   // the 4 AM-rollover practice day — single source of truth in A.util (storage.js)
   function todayStr() { return A.util.dayKey(); }
 
@@ -267,6 +324,22 @@
       return { step: 'build', exKey: pick, title: 'Review ' + A.curr.def(pick).name,
                sub: late > 0 ? ('due for review — last practised ' + late + ' day' + (late === 1 ? '' : 's') + ' past its interval') : 'due for review today (spaced practice)' };
     }
+    // Error-specific correction: when the signed metrics show a CONSISTENT
+    // bias — a lean, an overshoot, a squash; a habit, not noise — a set aimed
+    // straight at that error outranks new material. This is the deliberate-
+    // practice core (Ericsson): tasks designed around the individual's
+    // measured weakness, not more undifferentiated reps. Below due reviews
+    // (decay first) but above exploring new drills.
+    const bias = biasReport(attempts);
+    if (bias) {
+      const fmt = (bias.mean > 0 ? '+' : '') + bias.mean + (bias.kind === 'angle' ? '°' : '%');
+      const sub = bias.kind === 'angle'
+        ? 'your last lines lean ' + fmt + ' ' + (bias.sign > 0 ? 'CW' : 'CCW') + ' on average (' + bias.n + ' figures) — a set aimed at that lean'
+        : bias.kind === 'length'
+          ? 'your last lines run ' + fmt + ' on average (' + bias.n + ' figures) — a set stressing length judgement'
+          : 'your recent shapes come out ' + fmt + ' — ' + (bias.sign > 0 ? 'too wide' : 'too tall') + ' on average (' + bias.n + ' figures)';
+      return { step: 'correction', exKey: bias.exKey, title: 'Correction set — ' + bias.label, sub, bias };
+    }
     // Basics solid → Application: bring in the real-subject (Module 4) drills you
     // haven't tried yet, in classical order, then keep the TRIED ones on the
     // spaced schedule (plates decay like everything else).
@@ -287,6 +360,6 @@
 
   A.game = { masteryPoints, rank, check, ACH, personalBest, noteStreak, rankUp,
              dailyPlan, planPick, notePlate, platesPassed, PLATES, PLATE_PASS,
-             weeklyRecap, starTier, recommend,
+             weeklyRecap, starTier, recommend, biasReport,
              weakestDrill, rankNames: RANKS.map((r) => r.name) };
 })(window.A = window.A || {});

@@ -47,21 +47,29 @@
     { key: 'sightsize', name: 'Sight-Size Copy', module: 4, scored: false, refCat: 'any',
       blurb: 'The atelier method: copy the plate at the same size, side by side — pure eye comparison, then an exact score.',
       study: () => 0, draw: null, maxLevel: 1 },
+    // Module 4 ladder: reference drills used to be a DESIGNED plateau — a fixed
+    // study clock forever, which is Ericsson's "arrested development" (once a
+    // task feels adequate, automaticity stops improvement). They now carry 3
+    // levels; the only dial a self-checked drill honestly has is the encoding
+    // glance, so level 2 = ×0.7 and level 3 = ×0.5 of the base seconds — the
+    // same shrinking-glance progression as the scored drills. Promotion lives
+    // in touchRef (a 5-score window at ≥80). Sight-size stays flat: it has no
+    // study clock at all — the plate is in view the whole time by design.
     { key: 'contour', name: 'Contour (Edges)', module: 4, scored: false, refCat: 'any',
       blurb: 'Trace one edge slowly from memory — eyes on the form, building edge-perception.',
-      study: () => 40, draw: null, maxLevel: 1 },
+      study: (l) => Math.round(40 * (l === 3 ? 0.5 : l === 2 ? 0.7 : 1)), draw: null, maxLevel: 3 },
     { key: 'negative', name: 'Negative Space', module: 4, scored: false, refCat: 'bargue',
       blurb: 'Memorise and draw only the empty shapes between forms.',
-      study: () => 45, draw: null, maxLevel: 1 },
+      study: (l) => Math.round(45 * (l === 3 ? 0.5 : l === 2 ? 0.7 : 1)), draw: null, maxLevel: 3 },
     { key: 'bargue', name: 'Bargue Block-In', module: 4, scored: false, refCat: 'bargue',
       blurb: 'Study a plate’s block-in, draw the envelope from memory, then ghost it back.',
-      study: () => 45, draw: null, maxLevel: 1 },
+      study: (l) => Math.round(45 * (l === 3 ? 0.5 : l === 2 ? 0.7 : 1)), draw: null, maxLevel: 3 },
     { key: 'value', name: 'Value study (photo)', module: 4, scored: false, refCat: 'any',
       blurb: 'The same shadow-line drill on a photo of a real lit object — import your own egg/cast photos.',
-      study: () => 60, draw: null, maxLevel: 1 },
+      study: (l) => Math.round(60 * (l === 3 ? 0.5 : l === 2 ? 0.7 : 1)), draw: null, maxLevel: 3 },
     { key: 'master', name: 'Master Copy', module: 4, scored: false, refCat: 'any',
       blurb: 'Lecoq’s Louvre exercise — study a whole image, draw it from memory.',
-      study: () => 90, draw: null, maxLevel: 1 }
+      study: (l) => Math.round(90 * (l === 3 ? 0.5 : l === 2 ? 0.7 : 1)), draw: null, maxLevel: 3 }
   ];
   const BY_KEY = {};
   EXERCISES.forEach((e) => (BY_KEY[e.key] = e));
@@ -198,7 +206,13 @@
     // Reference (Module 4) drills join the spaced schedule too: each completion
     // moves the drill up a box (longer interval), so plates come due for review
     // like everything else instead of vanishing after the first try.
-    touchRef(key, day) {
+    // They also carry the Module 4 LADDER: pass the attempt's score (self-
+    // rating or objective) and five completions averaging ≥80 promote the
+    // level, which shrinks the study glance (see EXERCISES). No regression —
+    // a weak reference copy is information for the learner, not evidence of
+    // decay (self-ratings are too noisy to demote on), so the ladder only
+    // ratchets up toward maxLevel.
+    touchRef(key, day, score) {
       const d = BY_KEY[key];
       if (!d || d.scored) return;
       const s = this._state();
@@ -207,6 +221,15 @@
       sch.count = (sch.count || 0) + 1;
       sch.box = Math.min(INTERVALS.length - 1, Math.floor(sch.count / 2));   // 2 completions per box
       sch.last = day || sch.last;
+      if (score != null && (d.maxLevel || 1) > 1) {
+        const win = st.refWindow || (st.refWindow = []);
+        win.push(score);
+        if (win.length > WINDOW) win.shift();
+        if (win.length >= WINDOW && win.reduce((a, b) => a + b, 0) / win.length >= 80) {
+          st.level = Math.min(d.maxLevel, (st.level || 1) + 1);
+          st.refWindow = [];        // fresh evidence required for the next rung
+        }
+      }
       this._save(s);
     },
     // tried reference drills due for review, most overdue first
