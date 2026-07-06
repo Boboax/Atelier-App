@@ -19,6 +19,14 @@ No feature reaches `main` without a version bump.
 
 ---
 
+## 1.10.0 — Single-figure references
+
+At a real easel you never see a whole lithograph sheet beside your paper — the atelier masks the plate so **one figure** sits next to the drawing. The bundled Bargue plates are multi-figure sheets, which made the sight-size reference panel show two or three subjects at once.
+
+- **8 new single-figure references** carved from the bundled plates (finished foot, block-in foot, finished + outline hand, finished + block-in Dante head, heel, foot sole), category **Single figures**, upscaled and sharpened for the panel.
+- The **sight-size picker lists single figures first** (then your own imports, then whole plates); master copy, value study and contour pickers include them too.
+- New reproducible pipeline `build/crop_refs.py` — regenerates the crops straight from the plates already embedded in `refs.js` (no external files needed); plate ids and the Bargue course are untouched.
+
 ## 1.9.0 — The string you can carry
 
 The sight-size string now works like the real thing — a taut string in two outstretched hands:

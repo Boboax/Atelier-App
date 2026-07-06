@@ -9,7 +9,7 @@
   'use strict';
   const CATS = {
     lines: 'Straight lines', polygons: 'Polygons', envelopes: 'Organic shapes',
-    bargue: 'Bargue plates', user: 'My references'
+    bargue: 'Bargue plates', cast: 'Single figures', user: 'My references'
   };
   let _items = [];
   const _imgCache = {};

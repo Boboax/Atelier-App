@@ -420,7 +420,13 @@
     // reference exercise → choose an image (exclude the abstract line/shape worksheets;
     // value/contour/master want real subjects — Bargue plates or your own photos)
     let items = A.library.byCategory(def.refCat);
-    if (def.refCat === 'any') items = items.filter((i) => i.category === 'bargue' || i.category === 'user');
+    if (def.refCat === 'any') items = items.filter((i) => i.category === 'cast' || i.category === 'bargue' || i.category === 'user');
+    // sight-size wants ONE subject beside the paper (the atelier masks the
+    // sheet); single figures first, whole multi-figure plates after
+    if (exKey === 'sightsize') {
+      const rank = (i) => i.category === 'cast' ? 0 : i.category === 'user' ? 1 : 2;
+      items = items.slice().sort((a, b) => rank(a) - rank(b));
+    }
     chooseReference(exKey, def, items);
   }
 
