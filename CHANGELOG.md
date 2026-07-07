@@ -19,6 +19,10 @@ No feature reaches `main` without a version bump.
 
 ---
 
+## 1.14.2 — Curves scored the dots, not the curve
+
+A curve that tracked the target almost perfectly could score **0** — if you'd followed the coaching and dotted the start, apex and end before drawing through them. Those dots were spliced into the front of the scored path, so the scorer traced a zig-zag (dot→dot→dot→curve) instead of your curve. Curve, gesture and terminator scoring now reconstruct the intended open path first — dropping the tiny dot-strokes and chaining the real curve — so dotting your anchors helps your drawing without wrecking the score. (Line and polygon scoring were already order-tolerant and unaffected.)
+
 ## 1.14.1 — Discrimination runs feel finite again
 
 The 2AFC discrimination warm-ups felt like they went on forever. 1.11.0 had switched them to end on a *reversal count* and filled the progress ring by reversals — but reversals arrive slowly and unevenly, so the ring stalled for many taps and a run could stretch to 30. Back to a **fixed 18-trial run** with the ring marching visibly 1/18 → 18/18 to a definite end. Reliability is unchanged: the warm start still lands trials near your just-noticeable difference and the score still averages the last reversals.

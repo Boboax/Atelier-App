@@ -344,14 +344,16 @@
         const tt = this.target.lines.slice().sort((a, b) => angOf(a) - angOf(b));
         r = A.geom.scoreAngles(tt, ut);
       } else if (this.exKey === 'curve') {
-        r = A.geom.scoreCurve(this.target.polyline, this.surface.pointsDesign());
+        // openPath: dropping dots + chaining strokes, so dotting the start/end/apex
+        // first (as the coach advises) then drawing through them scores the CURVE
+        r = A.geom.scoreCurve(this.target.polyline, A.geom.openPath(strokes));
       } else if (this.exKey === 'gesture') {
-        r = A.geom.scoreCurve(this.target.loa, this.surface.pointsDesign());
+        r = A.geom.scoreCurve(this.target.loa, A.geom.openPath(strokes));
       } else if (this.exKey === 'shade') {
         // POSITION matters: the shadow line must sit in the right place ON the
         // form, so no endpoint alignment; deviation scaled by the form's radius
         const f = this.target.form;
-        r = A.geom.scoreCurveFixed(this.target.polyline, this.surface.pointsDesign(), Math.max(f.rx, f.ry) * 2);
+        r = A.geom.scoreCurveFixed(this.target.polyline, A.geom.openPath(strokes), Math.max(f.rx, f.ry) * 2);
       } else {
         // score from ALL strokes combined (a shape drawn in several strokes is fine)
         r = A.geom.scoreShape(this.target.polygon, this.surface.pointsDesign());
