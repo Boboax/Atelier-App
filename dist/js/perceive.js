@@ -43,10 +43,12 @@
   function pickBow(lvl) { let b; do { b = +rnd(0.08, 0.45).toFixed(3); } while (lvl >= 4 && Math.abs(b - 0.25) < 0.03); return b; }
   function pickValue(lvl) { return Math.round(lvl >= 4 ? rnd(25, 75) : rnd(15, 85)); }   // mid-greys are the hard ones
 
-  let el, instr, timerEl, countEl, stim, ctrl, st = {};
+  let el, instr, timerEl, countEl, stim, ctrl, ctrls, ringWrap, st = {};
   let ringEl, ringFill, ringLabel;
   let wuCount = 0, wuStart = 0;            // rounds done + start time, for the warm-up progress
-  const TARGET = 8;                        // ~a 2–3 min warm-up
+  // ONE warm-up number app-wide (gamify.WARMUP_N): the plan's warm segment and
+  // this overlay must agree, or "Warm-up 8/8 ✓" leaves the plan row at 6/8
+  const TARGET = (A.game && A.game.WARMUP_N) || 8;   // ~a 2–3 min warm-up
   const mmss = (s) => { s = Math.max(0, Math.floor(s)); return Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0'); };
   function updateProg() {
     if (!countEl) return;
@@ -63,6 +65,9 @@
     if (ringEl) ringEl.classList.toggle('warn', !!warn);
     if (ringLabel) ringLabel.textContent = label || '';
   }
+  // outside a running clock the empty ring reads as broken — same .idle
+  // pattern as the drill header (styles.css .ringwrap.idle)
+  function ringIdle(idle) { if (ringWrap) ringWrap.classList.toggle('idle', !!idle); }
 
   function build() {
     if (el) return;
@@ -70,22 +75,36 @@
     el.id = 'perceive';
     el.innerHTML = `<div class="instructor"><div class="txt" id="p-instr">Study</div>
         <div style="display:flex;gap:12px;align-items:center"><div class="tiny muted" id="p-count"></div>
-          <div class="ringwrap"><div class="tring" id="p-ring"><svg viewBox="0 0 48 48"><circle class="track" cx="24" cy="24" r="20"></circle><circle class="fill" id="p-ringfill" cx="24" cy="24" r="20"></circle></svg><div class="tringtxt" id="p-timer"></div></div><div class="ringlabel" id="p-ringlabel"></div></div></div></div>
+          <div class="ringwrap" id="p-ringwrap"><div class="tring" id="p-ring"><svg viewBox="0 0 48 48"><circle class="track" cx="24" cy="24" r="20"></circle><circle class="fill" id="p-ringfill" cx="24" cy="24" r="20"></circle></svg><div class="tringtxt" id="p-timer"></div></div><div class="ringlabel" id="p-ringlabel"></div></div></div></div>
       <button class="closeX" id="p-close">✕</button>
-      <div class="p-stage"><div id="p-stim"></div><div id="p-ctrl"></div></div>`;
+      <div class="p-stage"><div id="p-stim"></div><div id="p-ctrl"></div></div>
+      <div class="controls" id="p-controls"></div>`;
     document.body.appendChild(el);
     instr = el.querySelector('#p-instr'); timerEl = el.querySelector('#p-timer'); countEl = el.querySelector('#p-count');
     ringEl = el.querySelector('#p-ring'); ringFill = el.querySelector('#p-ringfill'); ringLabel = el.querySelector('#p-ringlabel');
-    stim = el.querySelector('#p-stim'); ctrl = el.querySelector('#p-ctrl');
+    ringWrap = el.querySelector('#p-ringwrap');
+    stim = el.querySelector('#p-stim'); ctrl = el.querySelector('#p-ctrl'); ctrls = el.querySelector('#p-controls');
     el.querySelector('#p-close').addEventListener('click', close);
   }
+  let closeT = 0;
   function close() {
-    clearInterval(st.timer); el.classList.remove('on');
-    if (A.ui && A.ui.invalidate) A.ui.invalidate();   // Home must see the fresh warm-up attempts
-    if (A.ui) A.ui.go(A.ui.view);
+    clearInterval(st.timer);
+    // soft exit (matches the drill): a hard vanish reads as a crash. The
+    // timeout is kept so a quick reopen can cancel it (see start/startAFC).
+    el.classList.add('closing');
+    clearTimeout(closeT);
+    closeT = setTimeout(() => {
+      el.classList.remove('on', 'closing');
+      if (A.ui && A.ui.invalidate) A.ui.invalidate();   // Home must see the fresh warm-up attempts
+      if (A.ui) A.ui.go(A.ui.view);
+    }, 180);
   }
 
   // --- stimulus + preview rendering ---------------------------------------
+  // the stimulus box is ink on paper like the canvas — LITERAL colours, never
+  // CSS vars: dark mode flips --ink to cream, which vanished against the
+  // white sheet (the strokes were invisible all evening)
+  const INK = '#23201b', ACC = '#b4532a';
   function angleSVG(deg, color, w) {
     const cx = 140, cy = 100, L = 70, a = deg * Math.PI / 180;
     const dx = Math.cos(a) * L, dy = Math.sin(a) * L;
@@ -95,8 +114,8 @@
     opts = opts || {};
     const baseH = 150, leftX = 95, rightX = 165, w = 34, floor = 175;
     const rH = baseH * ratio;
-    let s = `<rect x="${leftX}" y="${floor - baseH}" width="${w}" height="${baseH}" fill="${opts.leftColor || 'var(--ink)'}"/>`;
-    if (!opts.hideRight) s += `<rect x="${rightX}" y="${floor - rH}" width="${w}" height="${rH}" fill="${opts.rightColor || 'var(--accent)'}"/>`;
+    let s = `<rect x="${leftX}" y="${floor - baseH}" width="${w}" height="${baseH}" fill="${opts.leftColor || INK}"/>`;
+    if (!opts.hideRight) s += `<rect x="${rightX}" y="${floor - rH}" width="${w}" height="${rH}" fill="${opts.rightColor || ACC}"/>`;
     return s;
   }
   // curve with a given bow (sagitta as a fraction of the chord) — quadratic bezier
@@ -115,21 +134,23 @@
     return `<circle cx="140" cy="100" r="72" fill="rgb(148,144,136)"/>
       <rect x="105" y="65" width="70" height="70" rx="8" fill="rgb(${g},${g},${g})"/>`;
   }
-  function svgBox(inner) { return `<svg viewBox="0 0 280 200" style="width:min(360px,82vw);height:auto;background:#fff;border:1px solid var(--line);border-radius:12px">${inner}</svg>`; }
+  function svgBox(inner) { return `<svg viewBox="0 0 280 200" style="width:min(520px,86vw);max-width:100%;height:auto;background:#fdfbf6;border:1px solid var(--line);border-radius:12px">${inner}</svg>`; }
 
   // --- flow ---------------------------------------------------------------
   function start(kind) {
-    build(); el.classList.add('on'); wuCount = 0; wuStart = 0; updateProg(); newRound(kind);
+    build(); clearTimeout(closeT); el.classList.remove('closing'); el.classList.add('on');
+    wuCount = 0; wuStart = 0; updateProg(); newRound(kind);
   }
   function newRound(kind) {
     if (!wuStart) wuStart = performance.now();
     updateProg();
+    ctrls.innerHTML = ''; ringIdle(false);
     const lvl = lvlOf(kind);
     st = { kind, level: lvl, timer: null };
     st.studySec = studyFor(kind, lvl);
     st.remaining = st.studySec;
-    if (kind === 'angle') { st.truth = pickAngle(lvl); stim.innerHTML = svgBox(angleSVG(st.truth, 'var(--ink)')); }
-    else if (kind === 'curve') { st.truth = pickBow(lvl); st.ang = lvl >= 5 ? Math.round(rnd(-35, 35)) : 0; stim.innerHTML = svgBox(curveSVG(st.truth, 'var(--ink)', 4, st.ang)); }
+    if (kind === 'angle') { st.truth = pickAngle(lvl); stim.innerHTML = svgBox(angleSVG(st.truth, INK)); }
+    else if (kind === 'curve') { st.truth = pickBow(lvl); st.ang = lvl >= 5 ? Math.round(rnd(-35, 35)) : 0; stim.innerHTML = svgBox(curveSVG(st.truth, INK, 4, st.ang)); }
     else if (kind === 'value') { st.truth = pickValue(lvl); stim.innerHTML = svgBox(valueSVG(st.truth)); }
     else { st.truth = pickRatio(lvl); stim.innerHTML = svgBox(barsSVG(st.truth)); }
     ctrl.innerHTML = '';
@@ -149,7 +170,7 @@
   }
 
   function recall() {
-    timerEl.textContent = ''; setRing(0, false, ''); st.t0 = performance.now();
+    timerEl.textContent = ''; setRing(0, false, ''); ringIdle(true); st.t0 = performance.now();
     const ASK = { angle: 'Set the line to the angle you saw.', curve: 'Set the bow to match.', value: 'Set the grey to match.', prop: 'Set the right bar to match.' };
     instr.textContent = ASK[st.kind] || ASK.prop;
     // randomised start anchor: a fixed start (90° / 60%) lets the eye learn
@@ -160,11 +181,11 @@
         <button class="btn block" id="p-submit" style="margin-top:12px">Reveal ›</button>`;
     if (st.kind === 'angle') {
       do { st.guess = Math.round(rnd(5, 174)); } while (Math.abs(st.guess - st.truth) < 20);
-      stim.innerHTML = svgBox(angleSVG(st.guess, 'var(--accent)'));
+      stim.innerHTML = svgBox(angleSVG(st.guess, ACC));
       ctrl.innerHTML = slider(0, 179, st.guess);
     } else if (st.kind === 'curve') {
       do { st.guess = Math.round(rnd(5, 50)) / 100; } while (Math.abs(st.guess - st.truth) < 0.1);
-      stim.innerHTML = svgBox(curveSVG(st.guess, 'var(--accent)', 4, st.ang));
+      stim.innerHTML = svgBox(curveSVG(st.guess, ACC, 4, st.ang));
       ctrl.innerHTML = slider(5, 50, Math.round(st.guess * 100));
     } else if (st.kind === 'value') {
       do { st.guess = Math.round(rnd(5, 95)); } while (Math.abs(st.guess - st.truth) < 18);
@@ -177,8 +198,8 @@
     }
     const range = el.querySelector('#p-range');
     range.oninput = () => {
-      if (st.kind === 'angle') { st.guess = +range.value; stim.innerHTML = svgBox(angleSVG(st.guess, 'var(--accent)')); }
-      else if (st.kind === 'curve') { st.guess = +range.value / 100; stim.innerHTML = svgBox(curveSVG(st.guess, 'var(--accent)', 4, st.ang)); }
+      if (st.kind === 'angle') { st.guess = +range.value; stim.innerHTML = svgBox(angleSVG(st.guess, ACC)); }
+      else if (st.kind === 'curve') { st.guess = +range.value / 100; stim.innerHTML = svgBox(curveSVG(st.guess, ACC, 4, st.ang)); }
       else if (st.kind === 'value') { st.guess = +range.value; stim.innerHTML = svgBox(valueSVG(st.guess)); }
       else { st.guess = +range.value / 100; stim.innerHTML = svgBox(barsSVG(st.guess)); }
     };
@@ -197,13 +218,13 @@
       if (se > 90) se -= 180; else if (se <= -90) se += 180;
       metrics = { angleErrDeg: +se.toFixed(1) };
       label = `You: ${st.guess}° · actual: ${st.truth}° · off ${Math.round(err)}°`;
-      stim.innerHTML = svgBox(angleSVG(st.truth, 'var(--ink)', 4) + angleSVG(st.guess, 'var(--accent)', 2));
+      stim.innerHTML = svgBox(angleSVG(st.truth, INK, 4) + angleSVG(st.guess, ACC, 2));
     } else if (st.kind === 'curve') {
       const err = Math.abs(st.guess - st.truth);
       score = Math.max(0, Math.round(100 - err * 300));
       metrics = { bowErr: +((st.guess - st.truth)).toFixed(3) };
       label = `You: ${Math.round(st.guess * 100)} · actual: ${Math.round(st.truth * 100)} (bow) · off ${Math.round(err * 100)}`;
-      stim.innerHTML = svgBox(curveSVG(st.truth, 'var(--ink)', 4, st.ang) + curveSVG(st.guess, 'var(--accent)', 2, st.ang));
+      stim.innerHTML = svgBox(curveSVG(st.truth, INK, 4, st.ang) + curveSVG(st.guess, ACC, 2, st.ang));
     } else if (st.kind === 'value') {
       const err = Math.abs(st.guess - st.truth);
       score = Math.max(0, Math.round(100 - err * 2.5));
@@ -220,7 +241,7 @@
       score = Math.max(0, Math.round(100 - err));
       metrics = { ratioErrPct: +((st.guess - st.truth) / st.truth * 100).toFixed(1) };
       label = `You: ${Math.round(st.guess * 100)}% · actual: ${Math.round(st.truth * 100)}% · off ${Math.round(err)}%`;
-      stim.innerHTML = svgBox(barsSVG(st.truth) + `<rect x="165" y="${175 - 150 * st.guess}" width="34" height="2" fill="#000"/>`);
+      stim.innerHTML = svgBox(barsSVG(st.truth) + `<rect x="165" y="${175 - 150 * st.guess}" width="34" height="2" fill="${INK}"/>`);
     }
     instr.textContent = 'Compare.';
     A.store.addAttempt({
@@ -241,13 +262,13 @@
     const wuLine = warmed
       ? `<div class="insight" style="margin-top:8px">✓ Well warmed up (${wuCount} in ${mmss(elapsed)}). Tap Done to start drawing.</div>`
       : `<div class="tiny muted" style="margin-top:8px">Warm-up ${wuCount}/${TARGET} · ${mmss(elapsed)} — a few more to prime your eye.</div>`;
-    // primary button = keep going until warmed, then = Done
-    const again = `<button class="btn ${warmed ? 'ghost' : ''} block" id="p-again">Again</button>`;
-    const done = `<button class="btn ${warmed ? '' : 'ghost'} block" id="p-done">Done</button>`;
+    // primary button = keep going until warmed, then = Done — docked in the
+    // bottom controls bar like the drill's, not floating mid-card
     ctrl.innerHTML = `<div class="card" style="width:100%;text-align:center">
       <div class="scorebadge ${cls}">${score}</div><div class="muted small">accuracy</div>
-      <div class="small" style="margin:8px 0">${label}</div>${lvlMsg}${wuLine}
-      <div class="row" style="margin-top:8px">${again}${done}</div></div>`;
+      <div class="small" style="margin:8px 0">${label}</div>${lvlMsg}${wuLine}</div>`;
+    ctrls.innerHTML = `<button class="btn ${warmed ? 'ghost' : ''}" id="p-again">Again</button>
+      <button class="btn ${warmed ? '' : 'ghost'}" id="p-done">Done</button>`;
     el.querySelector('#p-again').onclick = () => newRound(st.kind);
     el.querySelector('#p-done').onclick = close;
     // the warm-up is the day's OPENER — once warmed, hand off to the next step
@@ -298,7 +319,8 @@
   // average the last 6 reversals.
   const AFC_TAPS = 30, AFC_REVS = 8;
   function startAFC(kind) {
-    build(); el.classList.add('on');
+    build(); clearTimeout(closeT); el.classList.remove('closing'); el.classList.add('on');
+    ctrls.innerHTML = ''; ringIdle(false);
     const cfg = AFC[kind] || AFC.angle;
     const last = A.store.get('afcLast', {})[kind];
     const startD = last ? Math.max(cfg.min, Math.min(cfg.max, last * 1.5)) : cfg.start;
@@ -318,13 +340,13 @@
       const base = rnd(15, 55);
       const hi = base + st.diff;                              // steeper = closer to vertical
       const lo = base;
-      const draw = (deg) => `<line x1="60" y1="170" x2="${60 + Math.cos(deg * Math.PI / 180) * 130}" y2="${170 - Math.sin(deg * Math.PI / 180) * 130}" stroke="var(--ink)" stroke-width="4" stroke-linecap="round"/>`;
+      const draw = (deg) => `<line x1="60" y1="170" x2="${60 + Math.cos(deg * Math.PI / 180) * 130}" y2="${170 - Math.sin(deg * Math.PI / 180) * 130}" stroke="${INK}" stroke-width="4" stroke-linecap="round"/>`;
       leftSVG = draw(st.moreIsLeft ? hi : lo); rightSVG = draw(st.moreIsLeft ? lo : hi);
     } else if (st.afc === 'curve') {
       const base = rnd(0.14, 0.30);                          // bow as fraction of chord
       const hi = base + st.diff / 100, lo = base;
       const bowPath = (b) => { const x0 = 40, x1 = 230, y = 150; const mx = (x0 + x1) / 2, my = y - b * (x1 - x0);
-        return `<path d="M ${x0} ${y} Q ${mx} ${my} ${x1} ${y}" fill="none" stroke="var(--ink)" stroke-width="4" stroke-linecap="round"/>`; };
+        return `<path d="M ${x0} ${y} Q ${mx} ${my} ${x1} ${y}" fill="none" stroke="${INK}" stroke-width="4" stroke-linecap="round"/>`; };
       leftSVG = bowPath(st.moreIsLeft ? hi : lo); rightSVG = bowPath(st.moreIsLeft ? lo : hi);
     } else if (st.afc === 'value') {
       const base = rnd(28, 58);                              // darkness 0-100; higher = darker
@@ -336,12 +358,12 @@
       const base = rnd(90, 130);
       const hi = base * (1 + st.diff / 100), lo = base;
       const draw = (len) => { const x = rnd(20, 250 - len); const y = rnd(80, 120);
-        return `<line x1="${x}" y1="${y}" x2="${x + len}" y2="${y}" stroke="var(--ink)" stroke-width="5" stroke-linecap="round"/>`; };
+        return `<line x1="${x}" y1="${y}" x2="${x + len}" y2="${y}" stroke="${INK}" stroke-width="5" stroke-linecap="round"/>`; };
       leftSVG = draw(st.moreIsLeft ? hi : lo); rightSVG = draw(st.moreIsLeft ? lo : hi);
     }
     stim.innerHTML = `<div style="display:flex;gap:10px;justify-content:center">
-      <div style="flex:1;max-width:200px">${svgBox(leftSVG)}</div>
-      <div style="flex:1;max-width:200px">${svgBox(rightSVG)}</div></div>`;
+      <div style="flex:1;max-width:255px">${svgBox(leftSVG)}</div>
+      <div style="flex:1;max-width:255px">${svgBox(rightSVG)}</div></div>`;
     ctrl.innerHTML = `<div class="row" style="margin-top:10px">
       <button class="btn block" id="afc-l">Left</button>
       <button class="btn block" id="afc-r">Right</button></div>
@@ -380,17 +402,16 @@
     if (isBest) { bests[st.afc] = threshold; A.store.set('afcBest', bests); }
     const lasts = A.store.get('afcLast', {}); lasts[st.afc] = threshold; A.store.set('afcLast', lasts);   // warm start for next run
     if (A.ui && A.ui.invalidate) A.ui.invalidate();
-    timerEl.textContent = ''; setRing(0, false, '');
+    timerEl.textContent = ''; setRing(0, false, ''); ringIdle(true);
     instr.textContent = 'Discrimination threshold.';
     stim.innerHTML = '';
     ctrl.innerHTML = `<div class="card" style="width:100%;text-align:center">
       <div class="scorebadge ${score >= 85 ? 's-good' : score >= 65 ? 's-mid' : 's-low'}">${threshold}${cfg.unit}</div>
       <div class="muted small">smallest difference your eye caught (${st.hits}/${st.taps} correct)</div>
       ${isBest ? '<div class="insight" style="margin-top:8px">★ Your finest threshold yet — the eye is sharpening.</div>'
-               : `<div class="tiny muted" style="margin-top:8px">Best so far: ${bests[st.afc]}${cfg.unit}. Lower is finer.</div>`}
-      <div class="row" style="margin-top:10px">
-        <button class="btn ghost block" id="p-again">Again</button>
-        <button class="btn block" id="p-done">Done</button></div></div>`;
+               : `<div class="tiny muted" style="margin-top:8px">Best so far: ${bests[st.afc]}${cfg.unit}. Lower is finer.</div>`}</div>`;
+    ctrls.innerHTML = `<button class="btn ghost" id="p-again">Again</button>
+      <button class="btn" id="p-done">Done</button>`;
     el.querySelector('#p-again').onclick = () => startAFC(st.afc);
     el.querySelector('#p-done').onclick = close;
   }

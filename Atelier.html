@@ -223,6 +223,11 @@ button{font-family:inherit;touch-action:manipulation}
 /* ---- drill (full screen) ---------------------------------------------- */
 #drill{position:fixed;inset:0;z-index:50;background:var(--paper);display:none;flex-direction:column}
 #drill.on{display:flex}
+/* soft enter/exit: the overlays fade in (~200ms) and out (~180ms, via .closing
+   + a JS timeout before display:none) — a hard cut reads as a glitch */
+#drill.on,#perceive.on{animation:fade .2s ease}
+@keyframes overlayout{to{opacity:0;transform:translateY(4px)}}
+#drill.on.closing,#perceive.on.closing{animation:overlayout .18s ease forwards}
 
 /* Landscape (iPad Pro etc.): canvas on the left, a side rail on the right for
    instructor + controls + reveal — bigger square box, nothing over the canvas. */
@@ -274,11 +279,11 @@ button{font-family:inherit;touch-action:manipulation}
 .ringlabel{font-size:9px;letter-spacing:.4px;text-transform:uppercase;color:var(--muted);font-weight:600}
 .tring.warn + .ringlabel{color:var(--warn)}
 #drill canvas{position:absolute;inset:0;width:100%;height:100%;touch-action:none}
-#drill .controls{position:absolute;left:0;right:0;bottom:0;z-index:5;
+#drill .controls,#perceive .controls{position:absolute;left:0;right:0;bottom:0;z-index:5;
   padding:12px 16px calc(env(safe-area-inset-bottom) + 14px);
   display:flex;flex-wrap:wrap;gap:8px;justify-content:center;align-items:center;
   background:linear-gradient(transparent, var(--paper) 42%)}   /* themed stage (see .instructor) */
-#drill .controls .btn{box-shadow:var(--shadow)}
+#drill .controls .btn,#perceive .controls .btn{box-shadow:var(--shadow)}
 /* compact icon tool tiles: many tools, ONE full-size CTA — hierarchy at a glance */
 .tbtn{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;
   min-width:46px;height:54px;padding:5px 7px 4px;flex:none;cursor:pointer;
@@ -312,6 +317,16 @@ button{font-family:inherit;touch-action:manipulation}
 @media (orientation:landscape) and (min-width:900px){
   #drill.on .resultcard{animation-name:scorein}
 }
+/* study-phase "look for" card: fills the rail's empty result slot in landscape;
+   hidden in portrait, where it would sit over the very figure being studied */
+.studycard{display:none;text-align:left}
+.studycard .lookcue{font-family:var(--serif);font-size:16px;line-height:1.5;margin-top:2px}
+@media (orientation:landscape) and (min-width:900px){
+  #drill.on .studycard{display:block}
+}
+/* estimate slider before its first touch: the randomised start value must not
+   read as a suggested answer — thumb/track muted until the learner moves it */
+input[type=range].untouched{opacity:.4;accent-color:var(--hair)}
 .estq{display:flex;gap:6px}
 .estq button{flex:1;padding:10px 4px;min-height:48px;border-radius:10px;border:1px solid var(--line);
   background:var(--card);font-size:15px;font-weight:600;cursor:pointer;color:var(--ink)}
@@ -340,8 +355,8 @@ input[type=range]{flex:1;accent-color:var(--accent);min-height:44px}
 /* top-anchored so the stimulus keeps a fixed position; the result grows downward
    below it instead of shoving it around when the screen is vertically centred. */
 #perceive .p-stage{display:flex;flex-direction:column;align-items:center;gap:16px;width:100%;
-  padding:calc(env(safe-area-inset-top) + 84px) 20px 24px}
-#perceive #p-ctrl{width:min(360px,82vw);min-height:150px}
+  padding:calc(env(safe-area-inset-top) + 84px) 20px calc(env(safe-area-inset-bottom) + 104px)}   /* clears the docked controls bar */
+#perceive #p-ctrl{width:min(520px,86vw);min-height:150px}
 
 /* ---- charts ------------------------------------------------------------ */
 .chart{width:100%;height:auto;display:block}
@@ -1603,6 +1618,7 @@ window.ATELIER_REFS = [{"id": "ws-lines-1","title": "Straight lines \u2014 set 1
     this.locked = false;        // set by the drill: no marks during STUDY/ESTIMATE
     this.sightSize = false;     // split layout: reference panel (left) + drawing panel (right) at 1:1
     this.refBox = null;         // the reference panel rect (sight-size mode)
+    this.showPlacement = false; // sight-size reveal: ghost the plate WHERE the copy should sit
     this.stepBack = false;      // zoomed-out judging view — drawing disabled
     this._flickUntil = 0;       // flash the reference over the drawing (eye-flick check)
     this.stringLine = null;     // the taut-string check: {a,b} design pts, spans both panels
@@ -1666,13 +1682,17 @@ window.ATELIER_REFS = [{"id": "ws-lines-1","title": "Straight lines \u2014 set 1
     const rail = window.matchMedia && window.matchMedia('(orientation:landscape) and (min-width:900px)').matches;
     const top = rail ? 10 : 72, bottom = rail ? 10 : 108;
     const availH = Math.max(80, r.height - top - bottom);
+    this.availH = availH;       // ui.js reads this for the sight-size rotate nudge
     if (this.sightSize) {
       // sight-size: two equal panels side by side — reference left, drawing
       // right, SAME scale by construction (the whole point of the method)
       const gap = 14;
       const s = Math.min((r.width - gap) / 2 * 0.96, availH * 0.96);
       const mx = (r.width - 2 * s - gap) / 2;
-      const y = top + (availH - s) / 2;
+      // portrait: width-limited panels leave a void below — lift the pair to
+      // the upper third so it reads composed, not sunk to mid-screen
+      const portrait = r.width < availH;
+      const y = top + (availH - s) * (portrait ? 0.25 : 0.5);
       this.refBox = { x: mx, y, s };
       this.box = { x: mx + s + gap, y, s };
     } else {
@@ -2093,7 +2113,7 @@ window.ATELIER_REFS = [{"id": "ws-lines-1","title": "Straight lines \u2014 set 1
     this.cropMode = false; this.cropRect = null;
     this.erasing = false; this._erasingActive = false; this._erasePt = null;
     this.measureMode = false; this.measures = []; this._curMeasure = null; this._measuring = false;
-    this.sightSize = false; this.refBox = null; this.stepBack = false;
+    this.sightSize = false; this.refBox = null; this.stepBack = false; this.showPlacement = false;
     this.stringLine = null; this.stringMode = false; this._stringing = false; this._flickUntil = 0;
     cancelAnimationFrame(this._revealRaf); this._revealFrac = 1;
     this._undoStack = [];
@@ -2447,6 +2467,10 @@ window.ATELIER_REFS = [{"id": "ws-lines-1","title": "Straight lines \u2014 set 1
       if (this.ghost) this._drawGhost(ctx, 1, this.refBox);
       // eye-flick: the reference flashed over the DRAWING panel for a beat
       if (this._flickUntil > performance.now() && this.ghost) this._drawGhost(ctx, 0.45, this.box);
+      // reveal placement ghost: the panels are 1:1, so the plate drawn into
+      // THIS box marks exactly where the copy should sit — the dx/dy/size
+      // numbers become something the eye can see, not just read
+      if (this.showPlacement && this.ghost) this._drawGhost(ctx, 0.35, this.box);
     }
 
     // sighting training wheels
@@ -2471,6 +2495,22 @@ window.ATELIER_REFS = [{"id": "ws-lines-1","title": "Straight lines \u2014 set 1
     // draws itself in (arc-length tween) the moment the answer lands
     if (this.revealTarget && this.target) {
       this._drawTargetGeom(ctx, '#c0392b', null, 2, this._revealFrac);
+    }
+    // sight-size placement reveal: the copy's bounding box in accent, against
+    // the ghosted plate at its true spot — the placement/size gap made visible
+    if (this.showPlacement && this.strokes.length) {
+      let x0 = 1e9, y0 = 1e9, x1 = -1e9, y1 = -1e9;
+      for (const s of this.strokes) for (const p of s.pts) {
+        if (p[0] < x0) x0 = p[0]; if (p[0] > x1) x1 = p[0];
+        if (p[1] < y0) y0 = p[1]; if (p[1] > y1) y1 = p[1];
+      }
+      if (x1 > x0 && y1 > y0) {
+        const a = this.toPx([x0, y0]), b = this.toPx([x1, y1]);
+        ctx.save();
+        ctx.strokeStyle = '#b4532a'; ctx.lineWidth = 1.5; ctx.setLineDash([7, 5]);
+        ctx.strokeRect(a[0], a[1], b[0] - a[0], b[1] - a[1]);
+        ctx.restore();
+      }
     }
     // eraser cursor
     if (this.erasing && this._erasePt) {
@@ -3185,6 +3225,10 @@ window.ATELIER_REFS = [{"id": "ws-lines-1","title": "Straight lines \u2014 set 1
      plan (not raw minutes) is what feeds the streak in 'plan' goal mode.     */
   // all perception-drill attempt types (adjustment + forced-choice) count as warm-up
   const PERC_TYPES = ['perc-angle', 'perc-prop', 'perc-curve', 'perc-value', 'afc-angle', 'afc-length', 'afc-curve', 'afc-value'];
+  // THE warm-up number — one source of truth for the plan's warm segment, the
+  // recommendation copy and the perceive overlay's target, which had drifted
+  // apart (plan said 6, overlay said 8, Home copy said ~8)
+  const WARMUP_N = 8;
   function planPick(attempts) {
     const today = todayStr();
     const stored = A.store.get('planPick', null);
@@ -3209,7 +3253,7 @@ window.ATELIER_REFS = [{"id": "ws-lines-1","title": "Straight lines \u2014 set 1
     const pickDef = A.curr.def(pick);
     const segments = [
       { key: 'warm', label: 'Warm up the eye', sub: 'judge angles & proportions, no drawing',
-        done: warmN >= 6, n: Math.min(warmN, 6), target: 6, step: 'warmup' },
+        done: warmN >= WARMUP_N, n: Math.min(warmN, WARMUP_N), target: WARMUP_N, step: 'warmup' },
       { key: 'focus', label: 'Focus work', sub: (pickDef ? pickDef.name : pick) + ' — or any 5 figures',
         done: focusN >= 5, n: Math.min(focusN, 5), target: 5, step: 'build', exKey: pick }
     ];
@@ -3264,7 +3308,7 @@ window.ATELIER_REFS = [{"id": "ws-lines-1","title": "Straight lines \u2014 set 1
     const percTs = (attempts || []).filter((a) => PERC_TYPES.indexOf(a.type) >= 0).map((a) => a.ts);
     const lastPerc = percTs.length ? Math.max.apply(null, percTs) : 0;
     if (!(lastPerc && now - lastPerc < WARM_MS)) {
-      return { step: 'warmup', title: 'Warm up your eye', sub: 'a short perception warm-up (~8 rounds, no drawing) to prime accurate seeing' };
+      return { step: 'warmup', title: 'Warm up your eye', sub: 'a short perception warm-up (~' + WARMUP_N + ' rounds, no drawing) to prime accurate seeing' };
     }
     // Retention check (Lecoq's real test): once per day, redraw a figure you
     // studied on a PREVIOUS day — cold, no study. Retrieval after a night's
@@ -3324,7 +3368,7 @@ window.ATELIER_REFS = [{"id": "ws-lines-1","title": "Straight lines \u2014 set 1
   }
 
   A.game = { masteryPoints, rank, check, ACH, personalBest, noteStreak, rankUp,
-             dailyPlan, planPick, notePlate, platesPassed, PLATES, PLATE_PASS,
+             dailyPlan, planPick, notePlate, platesPassed, PLATES, PLATE_PASS, WARMUP_N,
              weeklyRecap, starTier, recommend, biasReport,
              weakestDrill, rankNames: RANKS.map((r) => r.name) };
 })(window.A = window.A || {});
@@ -3908,10 +3952,12 @@ window.ATELIER_REFS = [{"id": "ws-lines-1","title": "Straight lines \u2014 set 1
   function pickBow(lvl) { let b; do { b = +rnd(0.08, 0.45).toFixed(3); } while (lvl >= 4 && Math.abs(b - 0.25) < 0.03); return b; }
   function pickValue(lvl) { return Math.round(lvl >= 4 ? rnd(25, 75) : rnd(15, 85)); }   // mid-greys are the hard ones
 
-  let el, instr, timerEl, countEl, stim, ctrl, st = {};
+  let el, instr, timerEl, countEl, stim, ctrl, ctrls, ringWrap, st = {};
   let ringEl, ringFill, ringLabel;
   let wuCount = 0, wuStart = 0;            // rounds done + start time, for the warm-up progress
-  const TARGET = 8;                        // ~a 2–3 min warm-up
+  // ONE warm-up number app-wide (gamify.WARMUP_N): the plan's warm segment and
+  // this overlay must agree, or "Warm-up 8/8 ✓" leaves the plan row at 6/8
+  const TARGET = (A.game && A.game.WARMUP_N) || 8;   // ~a 2–3 min warm-up
   const mmss = (s) => { s = Math.max(0, Math.floor(s)); return Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0'); };
   function updateProg() {
     if (!countEl) return;
@@ -3928,6 +3974,9 @@ window.ATELIER_REFS = [{"id": "ws-lines-1","title": "Straight lines \u2014 set 1
     if (ringEl) ringEl.classList.toggle('warn', !!warn);
     if (ringLabel) ringLabel.textContent = label || '';
   }
+  // outside a running clock the empty ring reads as broken — same .idle
+  // pattern as the drill header (styles.css .ringwrap.idle)
+  function ringIdle(idle) { if (ringWrap) ringWrap.classList.toggle('idle', !!idle); }
 
   function build() {
     if (el) return;
@@ -3935,22 +3984,36 @@ window.ATELIER_REFS = [{"id": "ws-lines-1","title": "Straight lines \u2014 set 1
     el.id = 'perceive';
     el.innerHTML = `<div class="instructor"><div class="txt" id="p-instr">Study</div>
         <div style="display:flex;gap:12px;align-items:center"><div class="tiny muted" id="p-count"></div>
-          <div class="ringwrap"><div class="tring" id="p-ring"><svg viewBox="0 0 48 48"><circle class="track" cx="24" cy="24" r="20"></circle><circle class="fill" id="p-ringfill" cx="24" cy="24" r="20"></circle></svg><div class="tringtxt" id="p-timer"></div></div><div class="ringlabel" id="p-ringlabel"></div></div></div></div>
+          <div class="ringwrap" id="p-ringwrap"><div class="tring" id="p-ring"><svg viewBox="0 0 48 48"><circle class="track" cx="24" cy="24" r="20"></circle><circle class="fill" id="p-ringfill" cx="24" cy="24" r="20"></circle></svg><div class="tringtxt" id="p-timer"></div></div><div class="ringlabel" id="p-ringlabel"></div></div></div></div>
       <button class="closeX" id="p-close">✕</button>
-      <div class="p-stage"><div id="p-stim"></div><div id="p-ctrl"></div></div>`;
+      <div class="p-stage"><div id="p-stim"></div><div id="p-ctrl"></div></div>
+      <div class="controls" id="p-controls"></div>`;
     document.body.appendChild(el);
     instr = el.querySelector('#p-instr'); timerEl = el.querySelector('#p-timer'); countEl = el.querySelector('#p-count');
     ringEl = el.querySelector('#p-ring'); ringFill = el.querySelector('#p-ringfill'); ringLabel = el.querySelector('#p-ringlabel');
-    stim = el.querySelector('#p-stim'); ctrl = el.querySelector('#p-ctrl');
+    ringWrap = el.querySelector('#p-ringwrap');
+    stim = el.querySelector('#p-stim'); ctrl = el.querySelector('#p-ctrl'); ctrls = el.querySelector('#p-controls');
     el.querySelector('#p-close').addEventListener('click', close);
   }
+  let closeT = 0;
   function close() {
-    clearInterval(st.timer); el.classList.remove('on');
-    if (A.ui && A.ui.invalidate) A.ui.invalidate();   // Home must see the fresh warm-up attempts
-    if (A.ui) A.ui.go(A.ui.view);
+    clearInterval(st.timer);
+    // soft exit (matches the drill): a hard vanish reads as a crash. The
+    // timeout is kept so a quick reopen can cancel it (see start/startAFC).
+    el.classList.add('closing');
+    clearTimeout(closeT);
+    closeT = setTimeout(() => {
+      el.classList.remove('on', 'closing');
+      if (A.ui && A.ui.invalidate) A.ui.invalidate();   // Home must see the fresh warm-up attempts
+      if (A.ui) A.ui.go(A.ui.view);
+    }, 180);
   }
 
   // --- stimulus + preview rendering ---------------------------------------
+  // the stimulus box is ink on paper like the canvas — LITERAL colours, never
+  // CSS vars: dark mode flips --ink to cream, which vanished against the
+  // white sheet (the strokes were invisible all evening)
+  const INK = '#23201b', ACC = '#b4532a';
   function angleSVG(deg, color, w) {
     const cx = 140, cy = 100, L = 70, a = deg * Math.PI / 180;
     const dx = Math.cos(a) * L, dy = Math.sin(a) * L;
@@ -3960,8 +4023,8 @@ window.ATELIER_REFS = [{"id": "ws-lines-1","title": "Straight lines \u2014 set 1
     opts = opts || {};
     const baseH = 150, leftX = 95, rightX = 165, w = 34, floor = 175;
     const rH = baseH * ratio;
-    let s = `<rect x="${leftX}" y="${floor - baseH}" width="${w}" height="${baseH}" fill="${opts.leftColor || 'var(--ink)'}"/>`;
-    if (!opts.hideRight) s += `<rect x="${rightX}" y="${floor - rH}" width="${w}" height="${rH}" fill="${opts.rightColor || 'var(--accent)'}"/>`;
+    let s = `<rect x="${leftX}" y="${floor - baseH}" width="${w}" height="${baseH}" fill="${opts.leftColor || INK}"/>`;
+    if (!opts.hideRight) s += `<rect x="${rightX}" y="${floor - rH}" width="${w}" height="${rH}" fill="${opts.rightColor || ACC}"/>`;
     return s;
   }
   // curve with a given bow (sagitta as a fraction of the chord) — quadratic bezier
@@ -3980,21 +4043,23 @@ window.ATELIER_REFS = [{"id": "ws-lines-1","title": "Straight lines \u2014 set 1
     return `<circle cx="140" cy="100" r="72" fill="rgb(148,144,136)"/>
       <rect x="105" y="65" width="70" height="70" rx="8" fill="rgb(${g},${g},${g})"/>`;
   }
-  function svgBox(inner) { return `<svg viewBox="0 0 280 200" style="width:min(360px,82vw);height:auto;background:#fff;border:1px solid var(--line);border-radius:12px">${inner}</svg>`; }
+  function svgBox(inner) { return `<svg viewBox="0 0 280 200" style="width:min(520px,86vw);max-width:100%;height:auto;background:#fdfbf6;border:1px solid var(--line);border-radius:12px">${inner}</svg>`; }
 
   // --- flow ---------------------------------------------------------------
   function start(kind) {
-    build(); el.classList.add('on'); wuCount = 0; wuStart = 0; updateProg(); newRound(kind);
+    build(); clearTimeout(closeT); el.classList.remove('closing'); el.classList.add('on');
+    wuCount = 0; wuStart = 0; updateProg(); newRound(kind);
   }
   function newRound(kind) {
     if (!wuStart) wuStart = performance.now();
     updateProg();
+    ctrls.innerHTML = ''; ringIdle(false);
     const lvl = lvlOf(kind);
     st = { kind, level: lvl, timer: null };
     st.studySec = studyFor(kind, lvl);
     st.remaining = st.studySec;
-    if (kind === 'angle') { st.truth = pickAngle(lvl); stim.innerHTML = svgBox(angleSVG(st.truth, 'var(--ink)')); }
-    else if (kind === 'curve') { st.truth = pickBow(lvl); st.ang = lvl >= 5 ? Math.round(rnd(-35, 35)) : 0; stim.innerHTML = svgBox(curveSVG(st.truth, 'var(--ink)', 4, st.ang)); }
+    if (kind === 'angle') { st.truth = pickAngle(lvl); stim.innerHTML = svgBox(angleSVG(st.truth, INK)); }
+    else if (kind === 'curve') { st.truth = pickBow(lvl); st.ang = lvl >= 5 ? Math.round(rnd(-35, 35)) : 0; stim.innerHTML = svgBox(curveSVG(st.truth, INK, 4, st.ang)); }
     else if (kind === 'value') { st.truth = pickValue(lvl); stim.innerHTML = svgBox(valueSVG(st.truth)); }
     else { st.truth = pickRatio(lvl); stim.innerHTML = svgBox(barsSVG(st.truth)); }
     ctrl.innerHTML = '';
@@ -4014,7 +4079,7 @@ window.ATELIER_REFS = [{"id": "ws-lines-1","title": "Straight lines \u2014 set 1
   }
 
   function recall() {
-    timerEl.textContent = ''; setRing(0, false, ''); st.t0 = performance.now();
+    timerEl.textContent = ''; setRing(0, false, ''); ringIdle(true); st.t0 = performance.now();
     const ASK = { angle: 'Set the line to the angle you saw.', curve: 'Set the bow to match.', value: 'Set the grey to match.', prop: 'Set the right bar to match.' };
     instr.textContent = ASK[st.kind] || ASK.prop;
     // randomised start anchor: a fixed start (90° / 60%) lets the eye learn
@@ -4025,11 +4090,11 @@ window.ATELIER_REFS = [{"id": "ws-lines-1","title": "Straight lines \u2014 set 1
         <button class="btn block" id="p-submit" style="margin-top:12px">Reveal ›</button>`;
     if (st.kind === 'angle') {
       do { st.guess = Math.round(rnd(5, 174)); } while (Math.abs(st.guess - st.truth) < 20);
-      stim.innerHTML = svgBox(angleSVG(st.guess, 'var(--accent)'));
+      stim.innerHTML = svgBox(angleSVG(st.guess, ACC));
       ctrl.innerHTML = slider(0, 179, st.guess);
     } else if (st.kind === 'curve') {
       do { st.guess = Math.round(rnd(5, 50)) / 100; } while (Math.abs(st.guess - st.truth) < 0.1);
-      stim.innerHTML = svgBox(curveSVG(st.guess, 'var(--accent)', 4, st.ang));
+      stim.innerHTML = svgBox(curveSVG(st.guess, ACC, 4, st.ang));
       ctrl.innerHTML = slider(5, 50, Math.round(st.guess * 100));
     } else if (st.kind === 'value') {
       do { st.guess = Math.round(rnd(5, 95)); } while (Math.abs(st.guess - st.truth) < 18);
@@ -4042,8 +4107,8 @@ window.ATELIER_REFS = [{"id": "ws-lines-1","title": "Straight lines \u2014 set 1
     }
     const range = el.querySelector('#p-range');
     range.oninput = () => {
-      if (st.kind === 'angle') { st.guess = +range.value; stim.innerHTML = svgBox(angleSVG(st.guess, 'var(--accent)')); }
-      else if (st.kind === 'curve') { st.guess = +range.value / 100; stim.innerHTML = svgBox(curveSVG(st.guess, 'var(--accent)', 4, st.ang)); }
+      if (st.kind === 'angle') { st.guess = +range.value; stim.innerHTML = svgBox(angleSVG(st.guess, ACC)); }
+      else if (st.kind === 'curve') { st.guess = +range.value / 100; stim.innerHTML = svgBox(curveSVG(st.guess, ACC, 4, st.ang)); }
       else if (st.kind === 'value') { st.guess = +range.value; stim.innerHTML = svgBox(valueSVG(st.guess)); }
       else { st.guess = +range.value / 100; stim.innerHTML = svgBox(barsSVG(st.guess)); }
     };
@@ -4062,13 +4127,13 @@ window.ATELIER_REFS = [{"id": "ws-lines-1","title": "Straight lines \u2014 set 1
       if (se > 90) se -= 180; else if (se <= -90) se += 180;
       metrics = { angleErrDeg: +se.toFixed(1) };
       label = `You: ${st.guess}° · actual: ${st.truth}° · off ${Math.round(err)}°`;
-      stim.innerHTML = svgBox(angleSVG(st.truth, 'var(--ink)', 4) + angleSVG(st.guess, 'var(--accent)', 2));
+      stim.innerHTML = svgBox(angleSVG(st.truth, INK, 4) + angleSVG(st.guess, ACC, 2));
     } else if (st.kind === 'curve') {
       const err = Math.abs(st.guess - st.truth);
       score = Math.max(0, Math.round(100 - err * 300));
       metrics = { bowErr: +((st.guess - st.truth)).toFixed(3) };
       label = `You: ${Math.round(st.guess * 100)} · actual: ${Math.round(st.truth * 100)} (bow) · off ${Math.round(err * 100)}`;
-      stim.innerHTML = svgBox(curveSVG(st.truth, 'var(--ink)', 4, st.ang) + curveSVG(st.guess, 'var(--accent)', 2, st.ang));
+      stim.innerHTML = svgBox(curveSVG(st.truth, INK, 4, st.ang) + curveSVG(st.guess, ACC, 2, st.ang));
     } else if (st.kind === 'value') {
       const err = Math.abs(st.guess - st.truth);
       score = Math.max(0, Math.round(100 - err * 2.5));
@@ -4085,7 +4150,7 @@ window.ATELIER_REFS = [{"id": "ws-lines-1","title": "Straight lines \u2014 set 1
       score = Math.max(0, Math.round(100 - err));
       metrics = { ratioErrPct: +((st.guess - st.truth) / st.truth * 100).toFixed(1) };
       label = `You: ${Math.round(st.guess * 100)}% · actual: ${Math.round(st.truth * 100)}% · off ${Math.round(err)}%`;
-      stim.innerHTML = svgBox(barsSVG(st.truth) + `<rect x="165" y="${175 - 150 * st.guess}" width="34" height="2" fill="#000"/>`);
+      stim.innerHTML = svgBox(barsSVG(st.truth) + `<rect x="165" y="${175 - 150 * st.guess}" width="34" height="2" fill="${INK}"/>`);
     }
     instr.textContent = 'Compare.';
     A.store.addAttempt({
@@ -4106,13 +4171,13 @@ window.ATELIER_REFS = [{"id": "ws-lines-1","title": "Straight lines \u2014 set 1
     const wuLine = warmed
       ? `<div class="insight" style="margin-top:8px">✓ Well warmed up (${wuCount} in ${mmss(elapsed)}). Tap Done to start drawing.</div>`
       : `<div class="tiny muted" style="margin-top:8px">Warm-up ${wuCount}/${TARGET} · ${mmss(elapsed)} — a few more to prime your eye.</div>`;
-    // primary button = keep going until warmed, then = Done
-    const again = `<button class="btn ${warmed ? 'ghost' : ''} block" id="p-again">Again</button>`;
-    const done = `<button class="btn ${warmed ? '' : 'ghost'} block" id="p-done">Done</button>`;
+    // primary button = keep going until warmed, then = Done — docked in the
+    // bottom controls bar like the drill's, not floating mid-card
     ctrl.innerHTML = `<div class="card" style="width:100%;text-align:center">
       <div class="scorebadge ${cls}">${score}</div><div class="muted small">accuracy</div>
-      <div class="small" style="margin:8px 0">${label}</div>${lvlMsg}${wuLine}
-      <div class="row" style="margin-top:8px">${again}${done}</div></div>`;
+      <div class="small" style="margin:8px 0">${label}</div>${lvlMsg}${wuLine}</div>`;
+    ctrls.innerHTML = `<button class="btn ${warmed ? 'ghost' : ''}" id="p-again">Again</button>
+      <button class="btn ${warmed ? '' : 'ghost'}" id="p-done">Done</button>`;
     el.querySelector('#p-again').onclick = () => newRound(st.kind);
     el.querySelector('#p-done').onclick = close;
     // the warm-up is the day's OPENER — once warmed, hand off to the next step
@@ -4163,7 +4228,8 @@ window.ATELIER_REFS = [{"id": "ws-lines-1","title": "Straight lines \u2014 set 1
   // average the last 6 reversals.
   const AFC_TAPS = 30, AFC_REVS = 8;
   function startAFC(kind) {
-    build(); el.classList.add('on');
+    build(); clearTimeout(closeT); el.classList.remove('closing'); el.classList.add('on');
+    ctrls.innerHTML = ''; ringIdle(false);
     const cfg = AFC[kind] || AFC.angle;
     const last = A.store.get('afcLast', {})[kind];
     const startD = last ? Math.max(cfg.min, Math.min(cfg.max, last * 1.5)) : cfg.start;
@@ -4183,13 +4249,13 @@ window.ATELIER_REFS = [{"id": "ws-lines-1","title": "Straight lines \u2014 set 1
       const base = rnd(15, 55);
       const hi = base + st.diff;                              // steeper = closer to vertical
       const lo = base;
-      const draw = (deg) => `<line x1="60" y1="170" x2="${60 + Math.cos(deg * Math.PI / 180) * 130}" y2="${170 - Math.sin(deg * Math.PI / 180) * 130}" stroke="var(--ink)" stroke-width="4" stroke-linecap="round"/>`;
+      const draw = (deg) => `<line x1="60" y1="170" x2="${60 + Math.cos(deg * Math.PI / 180) * 130}" y2="${170 - Math.sin(deg * Math.PI / 180) * 130}" stroke="${INK}" stroke-width="4" stroke-linecap="round"/>`;
       leftSVG = draw(st.moreIsLeft ? hi : lo); rightSVG = draw(st.moreIsLeft ? lo : hi);
     } else if (st.afc === 'curve') {
       const base = rnd(0.14, 0.30);                          // bow as fraction of chord
       const hi = base + st.diff / 100, lo = base;
       const bowPath = (b) => { const x0 = 40, x1 = 230, y = 150; const mx = (x0 + x1) / 2, my = y - b * (x1 - x0);
-        return `<path d="M ${x0} ${y} Q ${mx} ${my} ${x1} ${y}" fill="none" stroke="var(--ink)" stroke-width="4" stroke-linecap="round"/>`; };
+        return `<path d="M ${x0} ${y} Q ${mx} ${my} ${x1} ${y}" fill="none" stroke="${INK}" stroke-width="4" stroke-linecap="round"/>`; };
       leftSVG = bowPath(st.moreIsLeft ? hi : lo); rightSVG = bowPath(st.moreIsLeft ? lo : hi);
     } else if (st.afc === 'value') {
       const base = rnd(28, 58);                              // darkness 0-100; higher = darker
@@ -4201,12 +4267,12 @@ window.ATELIER_REFS = [{"id": "ws-lines-1","title": "Straight lines \u2014 set 1
       const base = rnd(90, 130);
       const hi = base * (1 + st.diff / 100), lo = base;
       const draw = (len) => { const x = rnd(20, 250 - len); const y = rnd(80, 120);
-        return `<line x1="${x}" y1="${y}" x2="${x + len}" y2="${y}" stroke="var(--ink)" stroke-width="5" stroke-linecap="round"/>`; };
+        return `<line x1="${x}" y1="${y}" x2="${x + len}" y2="${y}" stroke="${INK}" stroke-width="5" stroke-linecap="round"/>`; };
       leftSVG = draw(st.moreIsLeft ? hi : lo); rightSVG = draw(st.moreIsLeft ? lo : hi);
     }
     stim.innerHTML = `<div style="display:flex;gap:10px;justify-content:center">
-      <div style="flex:1;max-width:200px">${svgBox(leftSVG)}</div>
-      <div style="flex:1;max-width:200px">${svgBox(rightSVG)}</div></div>`;
+      <div style="flex:1;max-width:255px">${svgBox(leftSVG)}</div>
+      <div style="flex:1;max-width:255px">${svgBox(rightSVG)}</div></div>`;
     ctrl.innerHTML = `<div class="row" style="margin-top:10px">
       <button class="btn block" id="afc-l">Left</button>
       <button class="btn block" id="afc-r">Right</button></div>
@@ -4245,17 +4311,16 @@ window.ATELIER_REFS = [{"id": "ws-lines-1","title": "Straight lines \u2014 set 1
     if (isBest) { bests[st.afc] = threshold; A.store.set('afcBest', bests); }
     const lasts = A.store.get('afcLast', {}); lasts[st.afc] = threshold; A.store.set('afcLast', lasts);   // warm start for next run
     if (A.ui && A.ui.invalidate) A.ui.invalidate();
-    timerEl.textContent = ''; setRing(0, false, '');
+    timerEl.textContent = ''; setRing(0, false, ''); ringIdle(true);
     instr.textContent = 'Discrimination threshold.';
     stim.innerHTML = '';
     ctrl.innerHTML = `<div class="card" style="width:100%;text-align:center">
       <div class="scorebadge ${score >= 85 ? 's-good' : score >= 65 ? 's-mid' : 's-low'}">${threshold}${cfg.unit}</div>
       <div class="muted small">smallest difference your eye caught (${st.hits}/${st.taps} correct)</div>
       ${isBest ? '<div class="insight" style="margin-top:8px">★ Your finest threshold yet — the eye is sharpening.</div>'
-               : `<div class="tiny muted" style="margin-top:8px">Best so far: ${bests[st.afc]}${cfg.unit}. Lower is finer.</div>`}
-      <div class="row" style="margin-top:10px">
-        <button class="btn ghost block" id="p-again">Again</button>
-        <button class="btn block" id="p-done">Done</button></div></div>`;
+               : `<div class="tiny muted" style="margin-top:8px">Best so far: ${bests[st.afc]}${cfg.unit}. Lower is finer.</div>`}</div>`;
+    ctrls.innerHTML = `<button class="btn ghost" id="p-again">Again</button>
+      <button class="btn" id="p-done">Done</button>`;
     el.querySelector('#p-again').onclick = () => startAFC(st.afc);
     el.querySelector('#p-done').onclick = close;
   }
@@ -4930,6 +4995,9 @@ window.ATELIER_REFS = [{"id": "ws-lines-1","title": "Straight lines \u2014 set 1
     'afc-angle': 'Discriminate: Angle', 'afc-length': 'Discriminate: Length',
     'afc-curve': 'Discriminate: Curve', 'afc-value': 'Discriminate: Value' };
   const exName = (type) => { const d = A.curr.def(type); return d ? d.name : (PERC_LABELS[type] || type); };
+  // first word of a name for tight chips/captions — strips the colon the
+  // PERC_LABELS names carry ('Perceive: Angle' must not caption as 'Perceive:')
+  const exShort = (type) => exName(type).split(' ')[0].replace(/:$/, '');
   const LOOKCUE = {
     line: 'its slant & length', angles: 'the angles between & the relative lengths',
     curve: 'its start, end & apex — the furthest point it bows out',
@@ -5026,7 +5094,7 @@ window.ATELIER_REFS = [{"id": "ws-lines-1","title": "Straight lines \u2014 set 1
     const sv = savedSession();
     if (r.step === 'warmup') {
       return { step: 'warmup', exKey: '', title: r.title,
-        sub: sv ? 'Prime your eye first (~8 rounds), then resume your ' + (sv.kind === 'warmup' ? 'quick session' : 'mixed session') : r.sub,
+        sub: sv ? 'Prime your eye first (~' + A.game.WARMUP_N + ' rounds), then resume your ' + (sv.kind === 'warmup' ? 'quick session' : 'mixed session') : r.sub,
         btn: 'Warm up' };
     }
     if (sv) return { step: 'resume', exKey: '', title: 'Resume ' + (sv.kind === 'warmup' ? 'quick session' : 'mixed session'), sub: sv.completed + '/' + sv.queue.length + ' done today', btn: 'Resume' };
@@ -5097,7 +5165,7 @@ window.ATELIER_REFS = [{"id": "ws-lines-1","title": "Straight lines \u2014 set 1
     const cand = scored.filter((x) => x.gap <= best + 1).map((x) => x.a);
     const att = cand[Math.floor(Math.random() * cand.length)];
     run = null; session = null;
-    const d = $('#drill'); d.classList.add('on');
+    const d = $('#drill'); clearTimeout(closeT); d.classList.remove('closing'); d.classList.add('on');
     surface.opts.pencilOnly = A.store.get('pencilOnly', false);
     surface.opts.baseWidth = A.store.get('inkWidth', 3.2);
     surface.opts.smooth = A.store.get('smooth', 0.5);
@@ -5701,7 +5769,7 @@ window.ATELIER_REFS = [{"id": "ws-lines-1","title": "Straight lines \u2014 set 1
     const kind = session ? session.kind : 'mixed';
     const fin = res.find((r) => r.finisher);
     session = null; sessionStart = 0; A.store.set('session', null);
-    drill.stop(); $('#drill').classList.remove('on'); invalidate();
+    drill.stop(); hideDrill(); invalidate();
     const sheet = openModal(`<h2>${kind === 'warmup' ? 'Quick session' : 'Mixed session'} complete</h2>
       <div class="kpi" style="margin:12px 0"><div class="k"><div class="v">${res.length}</div><div class="l">drills</div></div>
         <div class="k"><div class="v">${mean}</div><div class="l">mean</div></div>
@@ -5724,7 +5792,7 @@ window.ATELIER_REFS = [{"id": "ws-lines-1","title": "Straight lines \u2014 set 1
     const def = exKey ? A.curr.def(exKey) : null;
     const lvl = exKey ? A.curr.level(exKey) : 1;
     run = null;
-    drill.stop(); $('#drill').classList.remove('on'); invalidate();
+    drill.stop(); hideDrill(); invalidate();
     // correction set: close the loop — the diagnosed bias vs what THIS set
     // measured. Feedback about the fault itself (not just the score) is what
     // makes deliberate practice deliberate; one line, signed, same units.
@@ -5768,14 +5836,30 @@ window.ATELIER_REFS = [{"id": "ws-lines-1","title": "Straight lines \u2014 set 1
   }
 
   function openDrill(exKey, refItem, opts) {
-    const d = $('#drill'); d.classList.add('on');
+    const d = $('#drill'); clearTimeout(closeT); d.classList.remove('closing'); d.classList.add('on');
     surface.opts.pencilOnly = A.store.get('pencilOnly', false);
     surface.opts.baseWidth = A.store.get('inkWidth', 3.2);
     surface.opts.smooth = A.store.get('smooth', 0.5);
     // setTimeout (not rAF) so startup still runs if the first frame is throttled
-    setTimeout(() => { surface.resize(); drill.startExercise(exKey, refItem, opts); }, 0);
+    setTimeout(() => {
+      surface.resize(); drill.startExercise(exKey, refItem, opts);
+      // sight-size lives or dies by panel size: in portrait the two squares are
+      // width-limited and shrink badly — nudge toward landscape, once ever
+      if (exKey === 'sightsize' && !A.store.get('ssRotateHint', false) && surface.box.s < (surface.availH || surface.cssH) * 0.45) {
+        A.store.set('ssRotateHint', true);
+        toast('Sight-size works best in landscape — rotate your iPad.');
+      }
+    }, 0);
   }
-  function closeDrill() { session = null; run = null; sessionStart = 0; drill.stop(); $('#drill').classList.remove('on'); invalidate(); ui.go(ui.view); }
+  // soft exit: ~180ms fade before display:none — a hard vanish reads as a crash
+  let closeT = 0;
+  function hideDrill(then) {
+    const d = $('#drill');
+    d.classList.add('closing');
+    clearTimeout(closeT);
+    closeT = setTimeout(() => { d.classList.remove('on', 'closing'); if (then) then(); }, 180);
+  }
+  function closeDrill() { session = null; run = null; sessionStart = 0; drill.stop(); invalidate(); hideDrill(() => ui.go(ui.view)); }
 
   // live progress chip (empty when practising a single standalone figure with no set)
   function updateSessClock() {
@@ -5806,8 +5890,9 @@ window.ATELIER_REFS = [{"id": "ws-lines-1","title": "Straight lines \u2014 set 1
     const t = $('#d-timer'), hint = $('#d-hint'), label = $('#d-ringlabel');
     const wrap = $('#d-ringwrap');
     // no time pressure during estimate/reveal — an empty ring reads as broken,
-    // so the whole ring hides until the next timed phase
-    const timed = drill.phase === 'study' || drill.phase === 'hold' || drill.phase === 'draw';
+    // so the whole ring hides until the next timed phase. Same for a budget-less
+    // draw (sight-size, recalls): the ring would sit permanently empty there.
+    const timed = drill.phase === 'study' || drill.phase === 'hold' || (drill.phase === 'draw' && !!drill.drawBudget);
     if (wrap) wrap.classList.toggle('idle', !timed);
     let lab = '';
     if (drill.phase === 'study') {
@@ -5869,6 +5954,10 @@ window.ATELIER_REFS = [{"id": "ws-lines-1","title": "Straight lines \u2014 set 1
     const def = drill.def;
     const instr = $('#d-instr'), timer = $('#d-timer'), controls = $('#d-controls'), result = $('#d-result');
     result.innerHTML = ''; timer.textContent = ''; timer.style.color = '';
+    // sight-size placement ghost lives only at the reveal (canvas.js draws the
+    // plate at its true spot + the copy's bbox) — cleared on refine/done
+    const place = drill.exKey === 'sightsize' && drill.phase === 'reveal' && !!drill.result;
+    if (surface.sightSize && surface.showPlacement !== place) { surface.showPlacement = place; surface.redraw(); }
     // "New figure" = swap in a fresh procedurally-generated figure of the same exercise
     // & level without it counting. Only for scored drills (reference/Bargue use a chosen
     // image, so a "new figure" makes no sense there).
@@ -5891,6 +5980,13 @@ window.ATELIER_REFS = [{"id": "ws-lines-1","title": "Straight lines \u2014 set 1
         ? `<button class="btn" data-act="skip">I’ve got it ›</button>`
         : `<button class="btn ghost" data-act="skip">Hide & draw now</button>`;
       controls.innerHTML = `${newFig}${flipBtn}${!def.scored ? measureBtns : ''}${commit}`;
+      // landscape rail: the result slot sits empty through the study — fill it
+      // with a quiet "what to look for" card (CSS shows it only in the rail;
+      // portrait would cover the figure being studied)
+      result.innerHTML = `<div class="card resultcard studycard">
+        <div class="eyebrow">Look for</div>
+        <div class="lookcue">${esc(cue.charAt(0).toUpperCase() + cue.slice(1))}.</div>
+        ${def.scored ? '<div class="tiny muted" style="margin-top:8px">~85% accuracy levels you up.</div>' : ''}</div>`;
     }
     else if (drill.phase === 'hold') {
       // retention hold: keep the image in the MIND'S EYE for a moment before
@@ -5955,7 +6051,7 @@ window.ATELIER_REFS = [{"id": "ws-lines-1","title": "Straight lines \u2014 set 1
         <div class="estq" style="margin:6px 0">
           ${[30, 50, 65, 75, 85, 95].map((p) => `<button data-estbox="${p}">${p}%</button>`).join('')}</div>
         <div class="row center" style="gap:8px"><span class="tiny muted">or fine-tune</span>
-          <input type="range" id="d-est" min="0" max="100" value="${estStart}" style="flex:1"></div>
+          <input type="range" id="d-est" class="untouched" min="0" max="100" value="${estStart}" style="flex:1"></div>
         <button class="btn block" data-estconfirm="1" disabled style="margin-top:8px">Reveal ›</button>
         <div class="tiny muted" style="margin-top:6px">Tap a box, or drag then Reveal. Guessing first trains your eye.</div></div>`;
       controls.innerHTML = '';
@@ -6271,7 +6367,7 @@ window.ATELIER_REFS = [{"id": "ws-lines-1","title": "Straight lines \u2014 set 1
       };
       result.oninput = (e) => {
         if (e.target.id === 'd-op') drill.setGhostOpacity(e.target.value / 100);
-        if (e.target.id === 'd-est') { const o = $('#d-estv'); if (o) o.textContent = e.target.value + '%'; const c = $('#d-result [data-estconfirm]'); if (c) c.disabled = false; $$('#d-result [data-estbox]').forEach((x) => x.classList.remove('sel')); }
+        if (e.target.id === 'd-est') { e.target.classList.remove('untouched'); const o = $('#d-estv'); if (o) o.textContent = e.target.value + '%'; const c = $('#d-result [data-estconfirm]'); if (c) c.disabled = false; $$('#d-result [data-estbox]').forEach((x) => x.classList.remove('sel')); }
       };
     }
   }
@@ -6291,7 +6387,7 @@ window.ATELIER_REFS = [{"id": "ws-lines-1","title": "Straight lines \u2014 set 1
     const trend = A.stats.dailyTrend(all, statsCat === 'all' ? null : statsCat);
     const trendTypes = Array.from(new Set(all.filter((a) => a.scored && !PERC_LABELS[a.type]).map((a) => a.type)));
     const trendChips = [`<button class="chip ${statsCat === 'all' ? 'active' : ''}" data-tcat="all">All</button>`]
-      .concat(trendTypes.map((t) => `<button class="chip ${statsCat === t ? 'active' : ''}" data-tcat="${t}">${esc(exName(t).split(' ')[0])}</button>`)).join('');
+      .concat(trendTypes.map((t) => `<button class="chip ${statsCat === t ? 'active' : ''}" data-tcat="${t}">${esc(exShort(t))}</button>`)).join('');
     const byType = Object.values(sum.byType).map((t) => ({ label: exName(t.type), value: t.mean, suffix: '' }));
 
     // discrimination thresholds (2AFC): lower = a finer eye — plot so up = better
@@ -6436,20 +6532,22 @@ window.ATELIER_REFS = [{"id": "ws-lines-1","title": "Straight lines \u2014 set 1
      ====================================================================== */
   let histCat = 'all';
   async function renderHistory(v) {
-    const all = (await attempts()).slice().sort((a, b) => b.ts - a.ts);
+    // perception rounds (perc-*/afc-*) are judgements, not drawings — they have
+    // no strokes to replay and live in Stats; the gallery is drawings only
+    const all = (await attempts()).filter((a) => !PERC_LABELS[a.type]).sort((a, b) => b.ts - a.ts);
     if (!all.length) {
       v.innerHTML = emptyState('Every drill you finish is kept here — a little gallery of your own strokes, replayable.');
       v.onclick = (e) => { const g = e.target.closest('[data-go]'); if (g) ui.go(g.dataset.go); };
       return;
     }
     // filter chips: only the types that actually have attempts
-    const types = Array.from(new Set(all.map((a) => a.type))).filter((t) => !PERC_LABELS[t]);
+    const types = Array.from(new Set(all.map((a) => a.type)));
     const chips = [`<button class="chip ${histCat === 'all' ? 'active' : ''}" data-cat="all">All</button>`]
-      .concat(types.map((t) => `<button class="chip ${histCat === t ? 'active' : ''}" data-cat="${t}">${esc(exName(t).split(' ')[0])}</button>`)).join('');
+      .concat(types.map((t) => `<button class="chip ${histCat === t ? 'active' : ''}" data-cat="${t}">${esc(exShort(t))}</button>`)).join('');
     const shown = histCat === 'all' ? all : all.filter((a) => a.type === histCat);
     const cells = shown.slice(0, 200).map((a) => {
       return `<div class="cell" data-att="${a.id}">${A.history.thumbSVG(a, 130)}
-        <div class="cap"><span>${esc(exName(a.type).split(' ')[0])}${a.recall ? ' ⟲' : ''}</span>
+        <div class="cap"><span>${esc(exShort(a.type))}${a.recall ? ' ⟲' : ''}</span>
         <span class="sc ${scoreClass(a.score)}">${a.score}${a.selfRated ? '*' : ''}</span></div></div>`;
     }).join('');
     // per-drill mini progress line when filtered
@@ -6568,6 +6666,10 @@ window.ATELIER_REFS = [{"id": "ws-lines-1","title": "Straight lines \u2014 set 1
     const allAtts = await attempts();
     // gold state: a drill held at cap — mastery is UPHELD, not just reached
     const star = (n, gold) => Array.from({ length: 5 }, (_, i) => `<span style="color:${i < n ? (gold ? 'var(--warn)' : 'var(--accent)') : 'var(--line)'}">★</span>`).join('');
+    // per-image bests for the reference drills — the same evidence the picker
+    // shows (its bestBy pattern), so the map and the picker tell one story
+    const bestBy = {};
+    allAtts.forEach((a) => { if (a.refId && a.score != null && !a.repeat) { const k = a.type + '|' + a.refId; bestBy[k] = Math.max(bestBy[k] || 0, a.score); } });
     const sections = A.curr.modules.map((m) => {
       const exs = A.curr.EXERCISES.filter((e) => e.module === m.n);
       const nodes = exs.map((e) => {
@@ -6583,8 +6685,23 @@ window.ATELIER_REFS = [{"id": "ws-lines-1","title": "Straight lines \u2014 set 1
           return `<div class="mapnode" data-ex="${e.key}"><div class="mn-name">${esc(e.name)} <span class="tag self">plate course</span></div>
             <div class="mn-stars"><span style="color:var(--accent);letter-spacing:2px">${stars}</span> <span class="tiny muted">${A.game.platesPassed()}/4 plates passed</span></div></div>`;
         }
-        return `<div class="mapnode" data-ex="${e.key}"><div class="mn-name">${esc(e.name)} <span class="tag self">self-check</span></div>
-          <div class="tiny muted">reference drill</div></div>`;
+        if (e.key === 'sightsize') {
+          // objectively scored despite living with the reference drills — the
+          // "self-check" tag under it read as a contradiction of its own reveal
+          const ss = allAtts.filter((a) => a.type === 'sightsize' && a.score != null && !a.repeat);
+          const best = ss.length ? Math.max.apply(null, ss.map((a) => a.score)) : 0;
+          return `<div class="mapnode" data-ex="${e.key}"><div class="mn-name">${esc(e.name)} <span class="tag">scored · exact score</span></div>
+            ${ss.length ? `<div class="mn-stars"><span style="color:var(--accent);letter-spacing:2px">${best >= 85 ? '★' : '☆'}</span> <span class="tiny muted">best ${best} · ${ss.length} cop${ss.length === 1 ? 'y' : 'ies'}</span></div>`
+                        : '<div class="tiny muted">position-exact copy — not started</div>'}</div>`;
+        }
+        // other reference drills: a star per image tried (filled at ≥85, the
+        // plate-course standard) + the Module 4 ladder rung
+        const ids = Object.keys(bestBy).filter((k) => k.indexOf(e.key + '|') === 0);
+        const best = ids.length ? Math.max.apply(null, ids.map((k) => bestBy[k])) : 0;
+        const perImg = ids.map((k) => bestBy[k] >= 85 ? '★' : '☆').join('');
+        return `<div class="mapnode" data-ex="${e.key}"><div class="mn-name">${esc(e.name)} <span class="tag self">self-check</span>${(e.maxLevel || 1) > 1 ? ` <span class="lvlpill">Lv ${A.curr.level(e.key)}</span>` : ''}</div>
+          ${ids.length ? `<div class="mn-stars"><span style="color:var(--accent);letter-spacing:2px">${perImg}</span> <span class="tiny muted">best ${best} · ${ids.length} image${ids.length === 1 ? '' : 's'}</span></div>`
+                       : '<div class="tiny muted">reference drill — not started</div>'}</div>`;
       }).join('');
       return `<div class="card"><div class="eyebrow">Module ${m.n}</div><h2>${esc(m.name)}</h2><div class="small muted">${esc(m.note)}</div>
         <div class="mapwrap">${nodes}</div></div>`;
@@ -6829,8 +6946,8 @@ window.ATELIER_REFS = [{"id": "ws-lines-1","title": "Straight lines \u2014 set 1
   'use strict';
   // Stamped by build/build.js: A.VERSION from build/version.json, A.BUILD from
   // the build clock (YYMMDD.HHMM). These literals are only the un-built dev fallback.
-  A.VERSION = '1.13.0';
-  A.BUILD = '260706.2211';
+  A.VERSION = '1.14.0';
+  A.BUILD = '260707.0848';
   function boot() {
     try { A.ui.init(); }
     catch (e) {

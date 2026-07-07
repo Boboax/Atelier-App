@@ -24,6 +24,9 @@
     'afc-angle': 'Discriminate: Angle', 'afc-length': 'Discriminate: Length',
     'afc-curve': 'Discriminate: Curve', 'afc-value': 'Discriminate: Value' };
   const exName = (type) => { const d = A.curr.def(type); return d ? d.name : (PERC_LABELS[type] || type); };
+  // first word of a name for tight chips/captions — strips the colon the
+  // PERC_LABELS names carry ('Perceive: Angle' must not caption as 'Perceive:')
+  const exShort = (type) => exName(type).split(' ')[0].replace(/:$/, '');
   const LOOKCUE = {
     line: 'its slant & length', angles: 'the angles between & the relative lengths',
     curve: 'its start, end & apex — the furthest point it bows out',
@@ -120,7 +123,7 @@
     const sv = savedSession();
     if (r.step === 'warmup') {
       return { step: 'warmup', exKey: '', title: r.title,
-        sub: sv ? 'Prime your eye first (~8 rounds), then resume your ' + (sv.kind === 'warmup' ? 'quick session' : 'mixed session') : r.sub,
+        sub: sv ? 'Prime your eye first (~' + A.game.WARMUP_N + ' rounds), then resume your ' + (sv.kind === 'warmup' ? 'quick session' : 'mixed session') : r.sub,
         btn: 'Warm up' };
     }
     if (sv) return { step: 'resume', exKey: '', title: 'Resume ' + (sv.kind === 'warmup' ? 'quick session' : 'mixed session'), sub: sv.completed + '/' + sv.queue.length + ' done today', btn: 'Resume' };
@@ -191,7 +194,7 @@
     const cand = scored.filter((x) => x.gap <= best + 1).map((x) => x.a);
     const att = cand[Math.floor(Math.random() * cand.length)];
     run = null; session = null;
-    const d = $('#drill'); d.classList.add('on');
+    const d = $('#drill'); clearTimeout(closeT); d.classList.remove('closing'); d.classList.add('on');
     surface.opts.pencilOnly = A.store.get('pencilOnly', false);
     surface.opts.baseWidth = A.store.get('inkWidth', 3.2);
     surface.opts.smooth = A.store.get('smooth', 0.5);
@@ -795,7 +798,7 @@
     const kind = session ? session.kind : 'mixed';
     const fin = res.find((r) => r.finisher);
     session = null; sessionStart = 0; A.store.set('session', null);
-    drill.stop(); $('#drill').classList.remove('on'); invalidate();
+    drill.stop(); hideDrill(); invalidate();
     const sheet = openModal(`<h2>${kind === 'warmup' ? 'Quick session' : 'Mixed session'} complete</h2>
       <div class="kpi" style="margin:12px 0"><div class="k"><div class="v">${res.length}</div><div class="l">drills</div></div>
         <div class="k"><div class="v">${mean}</div><div class="l">mean</div></div>
@@ -818,7 +821,7 @@
     const def = exKey ? A.curr.def(exKey) : null;
     const lvl = exKey ? A.curr.level(exKey) : 1;
     run = null;
-    drill.stop(); $('#drill').classList.remove('on'); invalidate();
+    drill.stop(); hideDrill(); invalidate();
     // correction set: close the loop — the diagnosed bias vs what THIS set
     // measured. Feedback about the fault itself (not just the score) is what
     // makes deliberate practice deliberate; one line, signed, same units.
@@ -862,14 +865,30 @@
   }
 
   function openDrill(exKey, refItem, opts) {
-    const d = $('#drill'); d.classList.add('on');
+    const d = $('#drill'); clearTimeout(closeT); d.classList.remove('closing'); d.classList.add('on');
     surface.opts.pencilOnly = A.store.get('pencilOnly', false);
     surface.opts.baseWidth = A.store.get('inkWidth', 3.2);
     surface.opts.smooth = A.store.get('smooth', 0.5);
     // setTimeout (not rAF) so startup still runs if the first frame is throttled
-    setTimeout(() => { surface.resize(); drill.startExercise(exKey, refItem, opts); }, 0);
+    setTimeout(() => {
+      surface.resize(); drill.startExercise(exKey, refItem, opts);
+      // sight-size lives or dies by panel size: in portrait the two squares are
+      // width-limited and shrink badly — nudge toward landscape, once ever
+      if (exKey === 'sightsize' && !A.store.get('ssRotateHint', false) && surface.box.s < (surface.availH || surface.cssH) * 0.45) {
+        A.store.set('ssRotateHint', true);
+        toast('Sight-size works best in landscape — rotate your iPad.');
+      }
+    }, 0);
   }
-  function closeDrill() { session = null; run = null; sessionStart = 0; drill.stop(); $('#drill').classList.remove('on'); invalidate(); ui.go(ui.view); }
+  // soft exit: ~180ms fade before display:none — a hard vanish reads as a crash
+  let closeT = 0;
+  function hideDrill(then) {
+    const d = $('#drill');
+    d.classList.add('closing');
+    clearTimeout(closeT);
+    closeT = setTimeout(() => { d.classList.remove('on', 'closing'); if (then) then(); }, 180);
+  }
+  function closeDrill() { session = null; run = null; sessionStart = 0; drill.stop(); invalidate(); hideDrill(() => ui.go(ui.view)); }
 
   // live progress chip (empty when practising a single standalone figure with no set)
   function updateSessClock() {
@@ -900,8 +919,9 @@
     const t = $('#d-timer'), hint = $('#d-hint'), label = $('#d-ringlabel');
     const wrap = $('#d-ringwrap');
     // no time pressure during estimate/reveal — an empty ring reads as broken,
-    // so the whole ring hides until the next timed phase
-    const timed = drill.phase === 'study' || drill.phase === 'hold' || drill.phase === 'draw';
+    // so the whole ring hides until the next timed phase. Same for a budget-less
+    // draw (sight-size, recalls): the ring would sit permanently empty there.
+    const timed = drill.phase === 'study' || drill.phase === 'hold' || (drill.phase === 'draw' && !!drill.drawBudget);
     if (wrap) wrap.classList.toggle('idle', !timed);
     let lab = '';
     if (drill.phase === 'study') {
@@ -963,6 +983,10 @@
     const def = drill.def;
     const instr = $('#d-instr'), timer = $('#d-timer'), controls = $('#d-controls'), result = $('#d-result');
     result.innerHTML = ''; timer.textContent = ''; timer.style.color = '';
+    // sight-size placement ghost lives only at the reveal (canvas.js draws the
+    // plate at its true spot + the copy's bbox) — cleared on refine/done
+    const place = drill.exKey === 'sightsize' && drill.phase === 'reveal' && !!drill.result;
+    if (surface.sightSize && surface.showPlacement !== place) { surface.showPlacement = place; surface.redraw(); }
     // "New figure" = swap in a fresh procedurally-generated figure of the same exercise
     // & level without it counting. Only for scored drills (reference/Bargue use a chosen
     // image, so a "new figure" makes no sense there).
@@ -985,6 +1009,13 @@
         ? `<button class="btn" data-act="skip">I’ve got it ›</button>`
         : `<button class="btn ghost" data-act="skip">Hide & draw now</button>`;
       controls.innerHTML = `${newFig}${flipBtn}${!def.scored ? measureBtns : ''}${commit}`;
+      // landscape rail: the result slot sits empty through the study — fill it
+      // with a quiet "what to look for" card (CSS shows it only in the rail;
+      // portrait would cover the figure being studied)
+      result.innerHTML = `<div class="card resultcard studycard">
+        <div class="eyebrow">Look for</div>
+        <div class="lookcue">${esc(cue.charAt(0).toUpperCase() + cue.slice(1))}.</div>
+        ${def.scored ? '<div class="tiny muted" style="margin-top:8px">~85% accuracy levels you up.</div>' : ''}</div>`;
     }
     else if (drill.phase === 'hold') {
       // retention hold: keep the image in the MIND'S EYE for a moment before
@@ -1049,7 +1080,7 @@
         <div class="estq" style="margin:6px 0">
           ${[30, 50, 65, 75, 85, 95].map((p) => `<button data-estbox="${p}">${p}%</button>`).join('')}</div>
         <div class="row center" style="gap:8px"><span class="tiny muted">or fine-tune</span>
-          <input type="range" id="d-est" min="0" max="100" value="${estStart}" style="flex:1"></div>
+          <input type="range" id="d-est" class="untouched" min="0" max="100" value="${estStart}" style="flex:1"></div>
         <button class="btn block" data-estconfirm="1" disabled style="margin-top:8px">Reveal ›</button>
         <div class="tiny muted" style="margin-top:6px">Tap a box, or drag then Reveal. Guessing first trains your eye.</div></div>`;
       controls.innerHTML = '';
@@ -1365,7 +1396,7 @@
       };
       result.oninput = (e) => {
         if (e.target.id === 'd-op') drill.setGhostOpacity(e.target.value / 100);
-        if (e.target.id === 'd-est') { const o = $('#d-estv'); if (o) o.textContent = e.target.value + '%'; const c = $('#d-result [data-estconfirm]'); if (c) c.disabled = false; $$('#d-result [data-estbox]').forEach((x) => x.classList.remove('sel')); }
+        if (e.target.id === 'd-est') { e.target.classList.remove('untouched'); const o = $('#d-estv'); if (o) o.textContent = e.target.value + '%'; const c = $('#d-result [data-estconfirm]'); if (c) c.disabled = false; $$('#d-result [data-estbox]').forEach((x) => x.classList.remove('sel')); }
       };
     }
   }
@@ -1385,7 +1416,7 @@
     const trend = A.stats.dailyTrend(all, statsCat === 'all' ? null : statsCat);
     const trendTypes = Array.from(new Set(all.filter((a) => a.scored && !PERC_LABELS[a.type]).map((a) => a.type)));
     const trendChips = [`<button class="chip ${statsCat === 'all' ? 'active' : ''}" data-tcat="all">All</button>`]
-      .concat(trendTypes.map((t) => `<button class="chip ${statsCat === t ? 'active' : ''}" data-tcat="${t}">${esc(exName(t).split(' ')[0])}</button>`)).join('');
+      .concat(trendTypes.map((t) => `<button class="chip ${statsCat === t ? 'active' : ''}" data-tcat="${t}">${esc(exShort(t))}</button>`)).join('');
     const byType = Object.values(sum.byType).map((t) => ({ label: exName(t.type), value: t.mean, suffix: '' }));
 
     // discrimination thresholds (2AFC): lower = a finer eye — plot so up = better
@@ -1530,20 +1561,22 @@
      ====================================================================== */
   let histCat = 'all';
   async function renderHistory(v) {
-    const all = (await attempts()).slice().sort((a, b) => b.ts - a.ts);
+    // perception rounds (perc-*/afc-*) are judgements, not drawings — they have
+    // no strokes to replay and live in Stats; the gallery is drawings only
+    const all = (await attempts()).filter((a) => !PERC_LABELS[a.type]).sort((a, b) => b.ts - a.ts);
     if (!all.length) {
       v.innerHTML = emptyState('Every drill you finish is kept here — a little gallery of your own strokes, replayable.');
       v.onclick = (e) => { const g = e.target.closest('[data-go]'); if (g) ui.go(g.dataset.go); };
       return;
     }
     // filter chips: only the types that actually have attempts
-    const types = Array.from(new Set(all.map((a) => a.type))).filter((t) => !PERC_LABELS[t]);
+    const types = Array.from(new Set(all.map((a) => a.type)));
     const chips = [`<button class="chip ${histCat === 'all' ? 'active' : ''}" data-cat="all">All</button>`]
-      .concat(types.map((t) => `<button class="chip ${histCat === t ? 'active' : ''}" data-cat="${t}">${esc(exName(t).split(' ')[0])}</button>`)).join('');
+      .concat(types.map((t) => `<button class="chip ${histCat === t ? 'active' : ''}" data-cat="${t}">${esc(exShort(t))}</button>`)).join('');
     const shown = histCat === 'all' ? all : all.filter((a) => a.type === histCat);
     const cells = shown.slice(0, 200).map((a) => {
       return `<div class="cell" data-att="${a.id}">${A.history.thumbSVG(a, 130)}
-        <div class="cap"><span>${esc(exName(a.type).split(' ')[0])}${a.recall ? ' ⟲' : ''}</span>
+        <div class="cap"><span>${esc(exShort(a.type))}${a.recall ? ' ⟲' : ''}</span>
         <span class="sc ${scoreClass(a.score)}">${a.score}${a.selfRated ? '*' : ''}</span></div></div>`;
     }).join('');
     // per-drill mini progress line when filtered
@@ -1662,6 +1695,10 @@
     const allAtts = await attempts();
     // gold state: a drill held at cap — mastery is UPHELD, not just reached
     const star = (n, gold) => Array.from({ length: 5 }, (_, i) => `<span style="color:${i < n ? (gold ? 'var(--warn)' : 'var(--accent)') : 'var(--line)'}">★</span>`).join('');
+    // per-image bests for the reference drills — the same evidence the picker
+    // shows (its bestBy pattern), so the map and the picker tell one story
+    const bestBy = {};
+    allAtts.forEach((a) => { if (a.refId && a.score != null && !a.repeat) { const k = a.type + '|' + a.refId; bestBy[k] = Math.max(bestBy[k] || 0, a.score); } });
     const sections = A.curr.modules.map((m) => {
       const exs = A.curr.EXERCISES.filter((e) => e.module === m.n);
       const nodes = exs.map((e) => {
@@ -1677,8 +1714,23 @@
           return `<div class="mapnode" data-ex="${e.key}"><div class="mn-name">${esc(e.name)} <span class="tag self">plate course</span></div>
             <div class="mn-stars"><span style="color:var(--accent);letter-spacing:2px">${stars}</span> <span class="tiny muted">${A.game.platesPassed()}/4 plates passed</span></div></div>`;
         }
-        return `<div class="mapnode" data-ex="${e.key}"><div class="mn-name">${esc(e.name)} <span class="tag self">self-check</span></div>
-          <div class="tiny muted">reference drill</div></div>`;
+        if (e.key === 'sightsize') {
+          // objectively scored despite living with the reference drills — the
+          // "self-check" tag under it read as a contradiction of its own reveal
+          const ss = allAtts.filter((a) => a.type === 'sightsize' && a.score != null && !a.repeat);
+          const best = ss.length ? Math.max.apply(null, ss.map((a) => a.score)) : 0;
+          return `<div class="mapnode" data-ex="${e.key}"><div class="mn-name">${esc(e.name)} <span class="tag">scored · exact score</span></div>
+            ${ss.length ? `<div class="mn-stars"><span style="color:var(--accent);letter-spacing:2px">${best >= 85 ? '★' : '☆'}</span> <span class="tiny muted">best ${best} · ${ss.length} cop${ss.length === 1 ? 'y' : 'ies'}</span></div>`
+                        : '<div class="tiny muted">position-exact copy — not started</div>'}</div>`;
+        }
+        // other reference drills: a star per image tried (filled at ≥85, the
+        // plate-course standard) + the Module 4 ladder rung
+        const ids = Object.keys(bestBy).filter((k) => k.indexOf(e.key + '|') === 0);
+        const best = ids.length ? Math.max.apply(null, ids.map((k) => bestBy[k])) : 0;
+        const perImg = ids.map((k) => bestBy[k] >= 85 ? '★' : '☆').join('');
+        return `<div class="mapnode" data-ex="${e.key}"><div class="mn-name">${esc(e.name)} <span class="tag self">self-check</span>${(e.maxLevel || 1) > 1 ? ` <span class="lvlpill">Lv ${A.curr.level(e.key)}</span>` : ''}</div>
+          ${ids.length ? `<div class="mn-stars"><span style="color:var(--accent);letter-spacing:2px">${perImg}</span> <span class="tiny muted">best ${best} · ${ids.length} image${ids.length === 1 ? '' : 's'}</span></div>`
+                       : '<div class="tiny muted">reference drill — not started</div>'}</div>`;
       }).join('');
       return `<div class="card"><div class="eyebrow">Module ${m.n}</div><h2>${esc(m.name)}</h2><div class="small muted">${esc(m.note)}</div>
         <div class="mapwrap">${nodes}</div></div>`;

@@ -209,6 +209,11 @@ button{font-family:inherit;touch-action:manipulation}
 /* ---- drill (full screen) ---------------------------------------------- */
 #drill{position:fixed;inset:0;z-index:50;background:var(--paper);display:none;flex-direction:column}
 #drill.on{display:flex}
+/* soft enter/exit: the overlays fade in (~200ms) and out (~180ms, via .closing
+   + a JS timeout before display:none) — a hard cut reads as a glitch */
+#drill.on,#perceive.on{animation:fade .2s ease}
+@keyframes overlayout{to{opacity:0;transform:translateY(4px)}}
+#drill.on.closing,#perceive.on.closing{animation:overlayout .18s ease forwards}
 
 /* Landscape (iPad Pro etc.): canvas on the left, a side rail on the right for
    instructor + controls + reveal — bigger square box, nothing over the canvas. */
@@ -260,11 +265,11 @@ button{font-family:inherit;touch-action:manipulation}
 .ringlabel{font-size:9px;letter-spacing:.4px;text-transform:uppercase;color:var(--muted);font-weight:600}
 .tring.warn + .ringlabel{color:var(--warn)}
 #drill canvas{position:absolute;inset:0;width:100%;height:100%;touch-action:none}
-#drill .controls{position:absolute;left:0;right:0;bottom:0;z-index:5;
+#drill .controls,#perceive .controls{position:absolute;left:0;right:0;bottom:0;z-index:5;
   padding:12px 16px calc(env(safe-area-inset-bottom) + 14px);
   display:flex;flex-wrap:wrap;gap:8px;justify-content:center;align-items:center;
   background:linear-gradient(transparent, var(--paper) 42%)}   /* themed stage (see .instructor) */
-#drill .controls .btn{box-shadow:var(--shadow)}
+#drill .controls .btn,#perceive .controls .btn{box-shadow:var(--shadow)}
 /* compact icon tool tiles: many tools, ONE full-size CTA — hierarchy at a glance */
 .tbtn{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;
   min-width:46px;height:54px;padding:5px 7px 4px;flex:none;cursor:pointer;
@@ -298,6 +303,16 @@ button{font-family:inherit;touch-action:manipulation}
 @media (orientation:landscape) and (min-width:900px){
   #drill.on .resultcard{animation-name:scorein}
 }
+/* study-phase "look for" card: fills the rail's empty result slot in landscape;
+   hidden in portrait, where it would sit over the very figure being studied */
+.studycard{display:none;text-align:left}
+.studycard .lookcue{font-family:var(--serif);font-size:16px;line-height:1.5;margin-top:2px}
+@media (orientation:landscape) and (min-width:900px){
+  #drill.on .studycard{display:block}
+}
+/* estimate slider before its first touch: the randomised start value must not
+   read as a suggested answer — thumb/track muted until the learner moves it */
+input[type=range].untouched{opacity:.4;accent-color:var(--hair)}
 .estq{display:flex;gap:6px}
 .estq button{flex:1;padding:10px 4px;min-height:48px;border-radius:10px;border:1px solid var(--line);
   background:var(--card);font-size:15px;font-weight:600;cursor:pointer;color:var(--ink)}
@@ -326,8 +341,8 @@ input[type=range]{flex:1;accent-color:var(--accent);min-height:44px}
 /* top-anchored so the stimulus keeps a fixed position; the result grows downward
    below it instead of shoving it around when the screen is vertically centred. */
 #perceive .p-stage{display:flex;flex-direction:column;align-items:center;gap:16px;width:100%;
-  padding:calc(env(safe-area-inset-top) + 84px) 20px 24px}
-#perceive #p-ctrl{width:min(360px,82vw);min-height:150px}
+  padding:calc(env(safe-area-inset-top) + 84px) 20px calc(env(safe-area-inset-bottom) + 104px)}   /* clears the docked controls bar */
+#perceive #p-ctrl{width:min(520px,86vw);min-height:150px}
 
 /* ---- charts ------------------------------------------------------------ */
 .chart{width:100%;height:auto;display:block}

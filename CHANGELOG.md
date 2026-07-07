@@ -19,6 +19,21 @@ No feature reaches `main` without a version bump.
 
 ---
 
+## 1.14.0 — Flow & finish
+
+A round of design-critique fixes, all about the same standard: every screen should behave like the same considered instrument — in the dark, in the rail, at the reveal.
+
+- **Dark-mode perception fixed**: the warm-up stimuli drew their strokes in `--ink` — cream in dark mode — on a hardcoded white box, so the line being memorised was *invisible all evening*. The stimulus box is now what the canvas already is: literal ink on literal paper, in both themes, through study, reveal and the 2AFC pairs.
+- **Sight-size reveal shows the answer, not just the numbers**: at the score, the plate ghosts into the drawing panel at its true position and size (the panels are 1:1, so that spot is exactly where the copy belongs) with your copy's bounding box in accent — "9.5% too high, 34% too small" becomes something the eye can see and the next refine can act on.
+- **One warm-up number**: the plan's warm segment said 6, the overlay counted to 8, the Home copy said "~8". A single `WARMUP_N` (8) now drives all three — finishing the warm-up finishes the plan row.
+- **History is a gallery again**: perception rounds (`perc-*`/`afc-*`) have no strokes to replay and were landing as blank cards captioned "Perceive:" — they now live only in Stats, and short captions can never keep a trailing colon.
+- **Perception overlay parity**: the timer ring hides when no clock is running (judge/reveal, and the drill's budget-less sight-size draw); Again/Done dock into a bottom controls bar like the drill's; the stimulus box grows to `min(520px, 86vw)` — it's the entire content of the screen, it should hold it.
+- **Soft enter/exit**: drill and perception overlays fade in (~200 ms) and out (~180 ms) instead of teleporting — the room stays calm at the two most-travelled seams in the app.
+- **The landscape rail teaches while you study**: the empty result slot carries a quiet card — *Look for* + the drill's cue in serif + the ~85% level-up reminder — so the study phase says what expert eyes extract, right where the score will land.
+- **Journey map honesty**: sight-size is tagged "scored · exact score" (its "self-check" tag contradicted its own reveal) with its best copy shown, and every reference drill shows the same per-image best/stars evidence as its picker, plus its Module 4 rung.
+- **The estimate slider stops suggesting**: its randomised start (there to defeat anchoring) rendered like a pre-filled answer — it now sits muted until first touch.
+- **Portrait sight-size**: the panel pair lifts to the upper third instead of sinking into a void, and a one-time nudge suggests landscape, where the method actually has room.
+
 ## 1.13.0 — Correction sets & the Module 4 ladder
 
 Two more items from the training-science audit, both about the same principle: practice should be *designed around measured performance*, not served generically.
