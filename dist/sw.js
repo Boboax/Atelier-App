@@ -1,7 +1,7 @@
 /* Atelier service worker — cache-first offline shell.
    Only used when the app is served over http(s).
    CACHE is stamped by build/build.js on every build — do not edit by hand. */
-const CACHE = 'atelier-260707.0848';
+const CACHE = 'atelier-260707.0956';
 const ASSETS = [
   '.', 'index.html', 'styles.css', 'manifest.webmanifest', 'robots.txt',
   'data/refs.js',
