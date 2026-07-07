@@ -289,7 +289,7 @@
      The fastest-proven format for sharpening discrimination: two stimuli, pick
      which is more (steeper / longer), immediate right-wrong feedback, and a
      2-down-1-up staircase that homes in on your just-noticeable difference.
-     Ends after 16 taps; the threshold (mean of the last reversals) is the
+     A fixed-length run; the threshold (mean of the last reversals) is the
      score that should shrink over weeks.                                     */
   const AFC = {
     angle:  { start: 14, min: 1,   max: 30, unit: '°', factor: 6, ask: 'Which line is steeper?' },
@@ -312,12 +312,14 @@
     return out;
   }
 
-  // a reliable staircase threshold needs ~6-8 reversals (Levitt 1971) — the old
-  // 16-tap / 4-reversal run measured mostly luck, so week-over-week progress
-  // drowned in test-retest noise. Now: warm-start near your last threshold
-  // (converges in a few trials), run to 8 reversals (or a 30-trial cap),
-  // average the last 6 reversals.
-  const AFC_TAPS = 30, AFC_REVS = 8;
+  // FIXED-LENGTH run: a warm-up has to feel bounded. A previous build ended on
+  // a reversal count and filled the ring by reversals — but reversals arrive
+  // slowly and unevenly, so the ring stalled for many taps and the run felt
+  // endless. Now every run is exactly AFC_TAPS trials with the ring marching
+  // visibly to the end. Reliability comes from warm-starting near last time's
+  // threshold (so the trials land near your JND) and averaging the last few
+  // reversals (Levitt 1971), not from a longer run.
+  const AFC_TAPS = 18, AVG_REVS = 6;
   function startAFC(kind) {
     build(); clearTimeout(closeT); el.classList.remove('closing'); el.classList.add('on');
     ctrls.innerHTML = ''; ringIdle(false);
@@ -332,7 +334,7 @@
   function afcRound() {
     const cfg = st.cfg;
     st.diff = Math.max(cfg.min, Math.min(cfg.max, st.diff));
-    timerEl.textContent = Math.min(st.reversals.length, AFC_REVS) + '/' + AFC_REVS;
+    timerEl.textContent = (st.taps + 1) + '/' + AFC_TAPS;
     instr.textContent = cfg.ask + '  ·  Δ ' + st.diff.toFixed(1) + cfg.unit;
     st.moreIsLeft = Math.random() < 0.5;
     let leftSVG, rightSVG;
@@ -377,14 +379,14 @@
     const stepped = stairStep(st, correct);
     if (stepped.reversal) st.reversals.push(st.diff);
     st.diff = stepped.diff; st.streak = stepped.streak; st.lastDir = stepped.lastDir;
-    setRing(Math.min(1, st.reversals.length / AFC_REVS), false, 'discriminate');
+    setRing(Math.min(1, st.taps / AFC_TAPS), false, 'discriminate');   // marches to a fixed end
     instr.textContent = correct ? '✓ Correct' : '✗ Not this time';
-    if (st.reversals.length >= AFC_REVS || st.taps >= AFC_TAPS) { setTimeout(afcEnd, 420); }
+    if (st.taps >= AFC_TAPS) { setTimeout(afcEnd, 420); }
     else setTimeout(afcRound, 420);
   }
   function afcEnd() {
     const cfg = st.cfg;
-    const revs = st.reversals.slice(-6);
+    const revs = st.reversals.slice(-AVG_REVS);
     const threshold = +(revs.length >= 2 ? revs.reduce((a, b) => a + b, 0) / revs.length : st.diff).toFixed(1);
     const elapsed = (performance.now() - st.t0) / 1000;
     const type = 'afc-' + st.afc;

@@ -19,6 +19,10 @@ No feature reaches `main` without a version bump.
 
 ---
 
+## 1.14.1 — Discrimination runs feel finite again
+
+The 2AFC discrimination warm-ups felt like they went on forever. 1.11.0 had switched them to end on a *reversal count* and filled the progress ring by reversals — but reversals arrive slowly and unevenly, so the ring stalled for many taps and a run could stretch to 30. Back to a **fixed 18-trial run** with the ring marching visibly 1/18 → 18/18 to a definite end. Reliability is unchanged: the warm start still lands trials near your just-noticeable difference and the score still averages the last reversals.
+
 ## 1.14.0 — Flow & finish
 
 A round of design-critique fixes, all about the same standard: every screen should behave like the same considered instrument — in the dark, in the rail, at the reveal.
