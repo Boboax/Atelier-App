@@ -78,6 +78,7 @@
     this.locked = false;        // set by the drill: no marks during STUDY/ESTIMATE
     this.sightSize = false;     // split layout: reference panel (left) + drawing panel (right) at 1:1
     this.refBox = null;         // the reference panel rect (sight-size mode)
+    this.showPlacement = false; // sight-size reveal: ghost the plate WHERE the copy should sit
     this.stepBack = false;      // zoomed-out judging view — drawing disabled
     this._flickUntil = 0;       // flash the reference over the drawing (eye-flick check)
     this.stringLine = null;     // the taut-string check: {a,b} design pts, spans both panels
@@ -141,13 +142,17 @@
     const rail = window.matchMedia && window.matchMedia('(orientation:landscape) and (min-width:900px)').matches;
     const top = rail ? 10 : 72, bottom = rail ? 10 : 108;
     const availH = Math.max(80, r.height - top - bottom);
+    this.availH = availH;       // ui.js reads this for the sight-size rotate nudge
     if (this.sightSize) {
       // sight-size: two equal panels side by side — reference left, drawing
       // right, SAME scale by construction (the whole point of the method)
       const gap = 14;
       const s = Math.min((r.width - gap) / 2 * 0.96, availH * 0.96);
       const mx = (r.width - 2 * s - gap) / 2;
-      const y = top + (availH - s) / 2;
+      // portrait: width-limited panels leave a void below — lift the pair to
+      // the upper third so it reads composed, not sunk to mid-screen
+      const portrait = r.width < availH;
+      const y = top + (availH - s) * (portrait ? 0.25 : 0.5);
       this.refBox = { x: mx, y, s };
       this.box = { x: mx + s + gap, y, s };
     } else {
@@ -568,7 +573,7 @@
     this.cropMode = false; this.cropRect = null;
     this.erasing = false; this._erasingActive = false; this._erasePt = null;
     this.measureMode = false; this.measures = []; this._curMeasure = null; this._measuring = false;
-    this.sightSize = false; this.refBox = null; this.stepBack = false;
+    this.sightSize = false; this.refBox = null; this.stepBack = false; this.showPlacement = false;
     this.stringLine = null; this.stringMode = false; this._stringing = false; this._flickUntil = 0;
     cancelAnimationFrame(this._revealRaf); this._revealFrac = 1;
     this._undoStack = [];
@@ -922,6 +927,10 @@
       if (this.ghost) this._drawGhost(ctx, 1, this.refBox);
       // eye-flick: the reference flashed over the DRAWING panel for a beat
       if (this._flickUntil > performance.now() && this.ghost) this._drawGhost(ctx, 0.45, this.box);
+      // reveal placement ghost: the panels are 1:1, so the plate drawn into
+      // THIS box marks exactly where the copy should sit — the dx/dy/size
+      // numbers become something the eye can see, not just read
+      if (this.showPlacement && this.ghost) this._drawGhost(ctx, 0.35, this.box);
     }
 
     // sighting training wheels
@@ -946,6 +955,22 @@
     // draws itself in (arc-length tween) the moment the answer lands
     if (this.revealTarget && this.target) {
       this._drawTargetGeom(ctx, '#c0392b', null, 2, this._revealFrac);
+    }
+    // sight-size placement reveal: the copy's bounding box in accent, against
+    // the ghosted plate at its true spot — the placement/size gap made visible
+    if (this.showPlacement && this.strokes.length) {
+      let x0 = 1e9, y0 = 1e9, x1 = -1e9, y1 = -1e9;
+      for (const s of this.strokes) for (const p of s.pts) {
+        if (p[0] < x0) x0 = p[0]; if (p[0] > x1) x1 = p[0];
+        if (p[1] < y0) y0 = p[1]; if (p[1] > y1) y1 = p[1];
+      }
+      if (x1 > x0 && y1 > y0) {
+        const a = this.toPx([x0, y0]), b = this.toPx([x1, y1]);
+        ctx.save();
+        ctx.strokeStyle = '#b4532a'; ctx.lineWidth = 1.5; ctx.setLineDash([7, 5]);
+        ctx.strokeRect(a[0], a[1], b[0] - a[0], b[1] - a[1]);
+        ctx.restore();
+      }
     }
     // eraser cursor
     if (this.erasing && this._erasePt) {

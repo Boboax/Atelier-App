@@ -53,11 +53,12 @@ test('gamify: all perception attempt types count toward the warm-up segment', ()
   const { A } = freshEnv(LOGIC);
   const day = (() => { const d = new Date(); return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'); })();
   const atts = [];
-  ['perc-angle', 'perc-prop', 'perc-curve', 'perc-value', 'afc-angle', 'afc-length'].forEach((t) => {
+  ['perc-angle', 'perc-prop', 'perc-curve', 'perc-value', 'afc-angle', 'afc-length', 'afc-curve', 'afc-value'].forEach((t) => {
     atts.push({ ts: Date.now(), day, type: t, scored: true, score: 80, repeat: false, recall: false });
   });
+  assert.equal(A.game.WARMUP_N, 8, 'one warm-up number app-wide');
   const plan = A.game.dailyPlan(atts);
-  assert.equal(plan.segments[0].done, true, '6 mixed perception rounds complete the warm-up');
+  assert.equal(plan.segments[0].done, true, 'WARMUP_N mixed perception rounds complete the warm-up');
 });
 
 test('ladder is curriculum-derived: gesture and shade count toward mastery', () => {

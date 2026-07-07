@@ -220,6 +220,10 @@
      plan (not raw minutes) is what feeds the streak in 'plan' goal mode.     */
   // all perception-drill attempt types (adjustment + forced-choice) count as warm-up
   const PERC_TYPES = ['perc-angle', 'perc-prop', 'perc-curve', 'perc-value', 'afc-angle', 'afc-length', 'afc-curve', 'afc-value'];
+  // THE warm-up number — one source of truth for the plan's warm segment, the
+  // recommendation copy and the perceive overlay's target, which had drifted
+  // apart (plan said 6, overlay said 8, Home copy said ~8)
+  const WARMUP_N = 8;
   function planPick(attempts) {
     const today = todayStr();
     const stored = A.store.get('planPick', null);
@@ -244,7 +248,7 @@
     const pickDef = A.curr.def(pick);
     const segments = [
       { key: 'warm', label: 'Warm up the eye', sub: 'judge angles & proportions, no drawing',
-        done: warmN >= 6, n: Math.min(warmN, 6), target: 6, step: 'warmup' },
+        done: warmN >= WARMUP_N, n: Math.min(warmN, WARMUP_N), target: WARMUP_N, step: 'warmup' },
       { key: 'focus', label: 'Focus work', sub: (pickDef ? pickDef.name : pick) + ' — or any 5 figures',
         done: focusN >= 5, n: Math.min(focusN, 5), target: 5, step: 'build', exKey: pick }
     ];
@@ -299,7 +303,7 @@
     const percTs = (attempts || []).filter((a) => PERC_TYPES.indexOf(a.type) >= 0).map((a) => a.ts);
     const lastPerc = percTs.length ? Math.max.apply(null, percTs) : 0;
     if (!(lastPerc && now - lastPerc < WARM_MS)) {
-      return { step: 'warmup', title: 'Warm up your eye', sub: 'a short perception warm-up (~8 rounds, no drawing) to prime accurate seeing' };
+      return { step: 'warmup', title: 'Warm up your eye', sub: 'a short perception warm-up (~' + WARMUP_N + ' rounds, no drawing) to prime accurate seeing' };
     }
     // Retention check (Lecoq's real test): once per day, redraw a figure you
     // studied on a PREVIOUS day — cold, no study. Retrieval after a night's
@@ -359,7 +363,7 @@
   }
 
   A.game = { masteryPoints, rank, check, ACH, personalBest, noteStreak, rankUp,
-             dailyPlan, planPick, notePlate, platesPassed, PLATES, PLATE_PASS,
+             dailyPlan, planPick, notePlate, platesPassed, PLATES, PLATE_PASS, WARMUP_N,
              weeklyRecap, starTier, recommend, biasReport,
              weakestDrill, rankNames: RANKS.map((r) => r.name) };
 })(window.A = window.A || {});

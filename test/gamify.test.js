@@ -43,12 +43,12 @@ test('dailyPlan: segments tick off from attempts; recall segment needs material'
   assert.equal(plan.segments.length, 2, 'no prior-day material → no recall segment');
   assert.equal(plan.complete, false);
   const atts = [];
-  for (let i = 0; i < 6; i++) atts.push(percAtt());
+  for (let i = 0; i < A.game.WARMUP_N; i++) atts.push(percAtt());
   for (let i = 0; i < 5; i++) atts.push(att());
   atts.push(att({ day: dayKey(-1), ts: Date.now() - 864e5 }));   // yesterday → recall material
   plan = A.game.dailyPlan(atts);
   assert.equal(plan.segments.length, 3);
-  assert.equal(plan.segments[0].done, true, 'warm-up done at 6 rounds');
+  assert.equal(plan.segments[0].done, true, 'warm-up done at WARMUP_N rounds');
   assert.equal(plan.segments[1].done, true, 'focus done at 5 genuine figures');
   assert.equal(plan.segments[2].done, false, 'recall still open');
   atts.push(att({ recall: true }));
