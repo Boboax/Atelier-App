@@ -177,3 +177,31 @@ test('distToSeg: segment distance, not infinite-line distance', () => {
   assert.ok(Math.abs(g.distToSeg([-0.4, 0.5], [0, 0.5], [1, 0.5]) - 0.4) < 1e-9, 'past a');
   assert.ok(Math.abs(g.distToSeg([0.3, 0.4], [0.3, 0.1], [0.3, 0.1]) - 0.3) < 1e-9, 'degenerate segment = point');
 });
+
+// regression: dotting the start/apex/end first (as the coach advises) then
+// drawing the curve through them must score the CURVE, not a zig-zag through
+// the dots. A near-perfect copy with three dot-strokes scored 0 before openPath.
+test('openPath: dots + a curve stroke score the curve, not the dots', () => {
+  const g = load().geom;
+  const T = [[0.15, 0.4], [0.35, 0.72], [0.5, 0.82], [0.65, 0.72], [0.85, 0.4]];   // a U
+  const curve = T.map((p) => [p[0] + 0.01, p[1] + 0.01]);                          // close copy stroke
+  const dotStart = [[0.15, 0.4], [0.151, 0.401]];   // tiny dot strokes at end/apex/end
+  const dotApex  = [[0.5, 0.82], [0.501, 0.821]];
+  const dotEnd   = [[0.85, 0.4], [0.851, 0.401]];
+  // as drawn: dots first, then the curve (worst case for naive concatenation)
+  const strokes = [dotStart, dotApex, dotEnd, curve];
+  const path = g.openPath(strokes);
+  // the reconstructed path is essentially just the curve stroke (dots dropped)
+  assert.ok(path.length === curve.length, 'dots dropped, curve kept: ' + path.length);
+  const scored = g.scoreCurve(T, path).score;
+  assert.ok(scored >= 85, 'dots+curve scores like the curve: ' + scored);
+  // vs the old naive concatenation, which scrambled the path
+  const naive = [];
+  for (const s of strokes) for (const p of s) naive.push(p);
+  assert.ok(g.scoreCurve(T, naive).score < scored, 'naive concat scored worse (the bug)');
+  // a single-stroke curve is unaffected
+  assert.deepEqual(g.openPath([curve]), curve);
+  // a curve drawn in two halves chains into one path
+  const left = T.slice(0, 3), right = T.slice(2);
+  assert.ok(g.scoreCurve(T, g.openPath([left, right])).score >= 90, 'two-piece curve chains');
+});

@@ -829,6 +829,39 @@ window.ATELIER_REFS = [{"id": "ws-lines-1","title": "Straight lines \u2014 set 1
      Like shape scoring but for an OPEN polyline — match the path of the curve
      (its bend/apex) rather than an enclosed area. Symmetric Chamfer, bbox-
      normalised, so size/position don't matter.                              */
+  // Reconstruct ONE open curve from possibly several strokes. The atelier method
+  // (and our own coaching) is to dot the start, apex and end, THEN draw through
+  // them — so the marks arrive as a few near-zero-length "dot" strokes plus the
+  // real curve. Ordered-polyline scorers (scoreCurve / scoreCurveFixed) must see
+  // the curve itself, not the dots concatenated in front of it (that spliced a
+  // zig-zag into the path and scored a perfect curve as 0). Drop the negligible
+  // strokes, then chain the substantive ones end-to-nearest-end into one path.
+  geom.openPath = function (strokes) {
+    const subs = (strokes || []).filter((s) => s && s.length >= 2);
+    if (!subs.length) { const all = []; for (const s of (strokes || [])) for (const p of s) all.push(p); return all; }
+    const len = (s) => geom.pathLength(s);
+    const maxLen = Math.max.apply(null, subs.map(len));
+    let keep = subs.filter((s) => len(s) >= 0.15 * maxLen && len(s) > 1e-4);   // a dot has ~0 arc length
+    if (!keep.length) keep = [subs.reduce((a, b) => (len(b) > len(a) ? b : a))];
+    if (keep.length === 1) return keep[0].slice();
+    // several real strokes (curve drawn in pieces) → greedy-chain by nearest end
+    const rem = keep.slice().sort((a, b) => (a[0][0] + a[0][1]) - (b[0][0] + b[0][1]));
+    let path = rem.shift().slice();
+    while (rem.length) {
+      const tail = path[path.length - 1];
+      let bi = 0, flip = false, bd = Infinity;
+      for (let i = 0; i < rem.length; i++) {
+        const s = rem[i];
+        const dS = geom.dist(tail, s[0]), dE = geom.dist(tail, s[s.length - 1]);
+        if (dS < bd) { bd = dS; bi = i; flip = false; }
+        if (dE < bd) { bd = dE; bi = i; flip = true; }
+      }
+      let s = rem.splice(bi, 1)[0];
+      path = path.concat(flip ? s.slice().reverse() : s);
+    }
+    return path;
+  };
+
   // Similarity transform mapping P's endpoints onto Q's (translate+rotate+scale).
   function endpointAlign(P, Q) {
     const p0 = P[0], pn = P[P.length - 1], q0 = Q[0], qn = Q[Q.length - 1];
@@ -3721,14 +3754,16 @@ window.ATELIER_REFS = [{"id": "ws-lines-1","title": "Straight lines \u2014 set 1
         const tt = this.target.lines.slice().sort((a, b) => angOf(a) - angOf(b));
         r = A.geom.scoreAngles(tt, ut);
       } else if (this.exKey === 'curve') {
-        r = A.geom.scoreCurve(this.target.polyline, this.surface.pointsDesign());
+        // openPath: dropping dots + chaining strokes, so dotting the start/end/apex
+        // first (as the coach advises) then drawing through them scores the CURVE
+        r = A.geom.scoreCurve(this.target.polyline, A.geom.openPath(strokes));
       } else if (this.exKey === 'gesture') {
-        r = A.geom.scoreCurve(this.target.loa, this.surface.pointsDesign());
+        r = A.geom.scoreCurve(this.target.loa, A.geom.openPath(strokes));
       } else if (this.exKey === 'shade') {
         // POSITION matters: the shadow line must sit in the right place ON the
         // form, so no endpoint alignment; deviation scaled by the form's radius
         const f = this.target.form;
-        r = A.geom.scoreCurveFixed(this.target.polyline, this.surface.pointsDesign(), Math.max(f.rx, f.ry) * 2);
+        r = A.geom.scoreCurveFixed(this.target.polyline, A.geom.openPath(strokes), Math.max(f.rx, f.ry) * 2);
       } else {
         // score from ALL strokes combined (a shape drawn in several strokes is fine)
         r = A.geom.scoreShape(this.target.polygon, this.surface.pointsDesign());
@@ -6948,8 +6983,8 @@ window.ATELIER_REFS = [{"id": "ws-lines-1","title": "Straight lines \u2014 set 1
   'use strict';
   // Stamped by build/build.js: A.VERSION from build/version.json, A.BUILD from
   // the build clock (YYMMDD.HHMM). These literals are only the un-built dev fallback.
-  A.VERSION = '1.14.1';
-  A.BUILD = '260707.0956';
+  A.VERSION = '1.14.2';
+  A.BUILD = '260707.1235';
   function boot() {
     try { A.ui.init(); }
     catch (e) {
