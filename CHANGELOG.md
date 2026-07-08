@@ -19,6 +19,10 @@ No feature reaches `main` without a version bump.
 
 ---
 
+## 1.15.1 — What "practice time" counts
+
+Two clarity fixes after the number read as suspiciously low. The minutes shown are **focused time** — active study + drawing only, not screen time; reading feedback and thinking between marks aren't counted (by design — it measures practice, not time on the app), so a short daily plan legitimately logs only a few minutes. Labels now say "focused" and drop the misleading 15-min goal line in plan mode (the default): the daily plan is deliberately brief, so a line it can't reach just read as perpetual failure. Also fixed: the day-dots and the practice-time bars marked plan-completed days as "missed" whenever they were under the raw minutes goal — they now honour the real goal (plan completed OR minutes hit), matching the streak.
+
 ## 1.15.0 — Practice-time chart
 
 Stats opens with a **Practice time** card: today's total and the past-7-days total up top ("today 17 min · past 7 days 76 min · goal 15 min/day"), and a bars-per-day chart over the last two weeks — quiet days grey, days that met your goal in accent, today highlighted, with a dashed goal line. The data was always tracked (it feeds the streak); now you can see the rhythm.

@@ -314,7 +314,7 @@
       ${resumeRow}
       <div class="row between center" style="margin-top:10px">
         <div class="pdots">${dots}</div>
-        <span class="tiny muted">${fmtMin(mins)} · ${A.habit.todayCount()} drills</span>
+        <span class="tiny muted" title="active study + drawing time, not screen time">${fmtMin(mins)} focused · ${A.habit.todayCount()} drills</span>
       </div></div>`;
 
     // ---- progression snapshot: the drill nearest promotion + compact levels ----
@@ -1482,10 +1482,20 @@
     const timeSeries = cal.map((d) => ({ day: d.day, mins: d.secs / 60, met: d.met }));
     const todayMin = A.habit.todayMinutes();
     const weekMin = cal.slice(-7).reduce((s, d) => s + d.secs / 60, 0);
+    // a minutes goal line only makes sense in minutes-goal mode; the default is
+    // plan-based (the daily plan is deliberately short — distributed practice —
+    // so a 15-min line it can't reach would just read as perpetual failure)
+    const minutesMode = A.habit.goalMode() === 'minutes';
     const goalMin = A.habit.goalMin();
+    // "focused" = active study + drawing time, NOT wall-clock: reading feedback
+    // and thinking between marks aren't counted, so this reads lower than the
+    // time on the clock — by design (it measures practice, not screen time)
+    const timeSub = minutesMode
+      ? `today <b>${fmtMin(todayMin)}</b> focused · past 7 days <b>${fmtMin(weekMin)}</b> · goal ${goalMin} min/day`
+      : `today <b>${fmtMin(todayMin)}</b> focused · past 7 days <b>${fmtMin(weekMin)}</b> · <span title="active study + drawing time, not screen time">study + drawing only</span>`;
     const timeCard = `<div class="card"><h2>Practice time</h2>
-      <div class="small muted">today <b>${fmtMin(todayMin)}</b> · past 7 days <b>${fmtMin(weekMin)}</b> · goal ${goalMin} min/day</div>
-      ${A.charts.dayTime(timeSeries, { goal: goalMin })}</div>`;
+      <div class="small muted">${timeSub}</div>
+      ${A.charts.dayTime(timeSeries, { goal: minutesMode ? goalMin : 0 })}</div>`;
 
     const sva = A.stats.studyVsAccuracy(all);
     const pa = all.filter((a) => a.type === 'perc-angle' && a.metrics && a.metrics.angleErrDeg != null).slice(-A.stats.BIAS_WINDOW);
