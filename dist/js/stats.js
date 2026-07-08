@@ -148,6 +148,36 @@
       return `<svg viewBox="0 0 ${W} ${H}" class="chart">${rows}</svg>`;
     },
 
+    // vertical bars of minutes per day: {day, mins, met}. Time (not a 0-100
+    // score), so the y-axis self-scales to the busiest day or the goal, whichever
+    // is taller. A dashed goal line; the last bar (today) is always highlighted,
+    // met days accent, quiet days grey — so a glance reads "how much, how often".
+    dayTime(series, o) {
+      o = Object.assign({ w: 520, h: 168, pad: 24, goal: 0 }, o || {});
+      if (!series.length) return '<div class="muted small">No data yet.</div>';
+      const W = o.w, H = o.h, P = o.pad, base = H - P;
+      const maxV = Math.max.apply(null, series.map((s) => s.mins).concat([o.goal, 1]));
+      const ymax = maxV * 1.15;
+      const Y = (v) => base - (v / ymax) * (base - P);
+      const n = series.length, slot = (W - 2 * P) / n, bw = Math.min(slot * 0.62, 26);
+      const bars = series.map((s, i) => {
+        const cx = P + slot * (i + 0.5), y = Y(s.mins), today = i === n - 1;
+        const fill = today || s.met ? 'var(--accent)' : 'var(--hair)';
+        const op = today ? '1' : (s.met ? '0.5' : '1');
+        return `<rect x="${(cx - bw / 2).toFixed(1)}" y="${y.toFixed(1)}" width="${bw.toFixed(1)}" height="${Math.max(0, base - y).toFixed(1)}" rx="3" fill="${fill}" fill-opacity="${op}"/>`;
+      }).join('');
+      let goalLine = '';
+      if (o.goal > 0) {
+        const gy = Y(o.goal);
+        goalLine = `<line x1="${P}" y1="${gy.toFixed(1)}" x2="${W - P}" y2="${gy.toFixed(1)}" stroke="var(--accent)" stroke-dasharray="4 4" stroke-opacity="0.55"/>` +
+                   `<text x="${W - P}" y="${(gy - 4).toFixed(1)}" class="ctick" text-anchor="end">goal ${o.goal}m</text>`;
+      }
+      const axis = `<line x1="${P}" y1="${base}" x2="${W - P}" y2="${base}" stroke="var(--hair)"/>` +
+        `<text x="${P}" y="${H - 4}" class="ctick">${esc(series[0].day.slice(5))}</text>` +
+        (n > 1 ? `<text x="${W - P}" y="${H - 4}" class="ctick" text-anchor="end">${esc(series[n - 1].day.slice(5))}</text>` : '');
+      return `<svg viewBox="0 0 ${W} ${H}" class="chart">${axis}${goalLine}${bars}</svg>`;
+    },
+
     // signed-bias bar: zero in the centre, value drawn left(neg)/right(pos)
     biasBar(value, range, labels) {
       const W = 520, H = 56, P = 16, mid = W / 2;
