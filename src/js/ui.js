@@ -1477,6 +1477,16 @@
         ${A.charts.line(trend)}</div>`;
     }
 
+    // time per day — answers "how long today?" and shows the rhythm at a glance
+    const cal = A.habit.calendar(14);
+    const timeSeries = cal.map((d) => ({ day: d.day, mins: d.secs / 60, met: d.met }));
+    const todayMin = A.habit.todayMinutes();
+    const weekMin = cal.slice(-7).reduce((s, d) => s + d.secs / 60, 0);
+    const goalMin = A.habit.goalMin();
+    const timeCard = `<div class="card"><h2>Practice time</h2>
+      <div class="small muted">today <b>${fmtMin(todayMin)}</b> · past 7 days <b>${fmtMin(weekMin)}</b> · goal ${goalMin} min/day</div>
+      ${A.charts.dayTime(timeSeries, { goal: goalMin })}</div>`;
+
     const sva = A.stats.studyVsAccuracy(all);
     const pa = all.filter((a) => a.type === 'perc-angle' && a.metrics && a.metrics.angleErrDeg != null).slice(-A.stats.BIAS_WINDOW);
     let percCard = '';
@@ -1503,6 +1513,7 @@
           <div class="k"><div class="v">${sum.days}</div><div class="l">days active</div></div>
           <div class="k"><div class="v flamev">${ICONS.flame}${A.habit.streak()}</div><div class="l">streak</div></div>
         </div></div>
+      ${timeCard}
       <div class="card"><h2>Accuracy over time</h2><div class="small muted">daily mean — tap a drill to isolate it</div>
         <div class="chips" style="margin:8px 0 4px">${trendChips}</div>${A.charts.line(trend)}</div>
       ${afcCard}

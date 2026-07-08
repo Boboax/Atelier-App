@@ -19,6 +19,10 @@ No feature reaches `main` without a version bump.
 
 ---
 
+## 1.15.0 — Practice-time chart
+
+Stats opens with a **Practice time** card: today's total and the past-7-days total up top ("today 17 min · past 7 days 76 min · goal 15 min/day"), and a bars-per-day chart over the last two weeks — quiet days grey, days that met your goal in accent, today highlighted, with a dashed goal line. The data was always tracked (it feeds the streak); now you can see the rhythm.
+
 ## 1.14.2 — Curves scored the dots, not the curve
 
 A curve that tracked the target almost perfectly could score **0** — if you'd followed the coaching and dotted the start, apex and end before drawing through them. Those dots were spliced into the front of the scored path, so the scorer traced a zig-zag (dot→dot→dot→curve) instead of your curve. Curve, gesture and terminator scoring now reconstruct the intended open path first — dropping the tiny dot-strokes and chaining the real curve — so dotting your anchors helps your drawing without wrecking the score. (Line and polygon scoring were already order-tolerant and unaffected.)
