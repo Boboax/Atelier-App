@@ -4526,6 +4526,26 @@ window.ATELIER_REFS = [{"id": "ws-lines-1","title": "Straight lines \u2014 set 1
       return { kind: 'shape', n: f.length, aspect: { mean: +mean(asp).toFixed(1), samples: asp } };
     },
 
+    // ENGAGED time for a day, reconstructed from attempt timestamps — the real
+    // "how long was I working at it", which the per-drill focused clock (study +
+    // draw only) undercounts. The gap between consecutive attempts is the time
+    // that produced the later one (drawing, guessing, reading the reveal), so we
+    // sum those gaps; a gap over GAP_CAP means you put it down and came back
+    // (a break, not practice) so it's replaced by just that drill's focused time.
+    // Works retroactively — no new data, only the ts already on every attempt.
+    GAP_CAP: 300,   // seconds; > 5 min between drills = a break, not a pause
+    engagedSeconds(attempts, dayKey) {
+      const a = attempts.filter((x) => x.day === dayKey && x.ts != null).sort((p, q) => p.ts - q.ts);
+      if (!a.length) return 0;
+      const focused = (x) => (x.studySec || 0) + (x.drawSec || 0) || 12;   // fallback ~12s
+      let total = focused(a[0]);   // first drill has no preceding gap to measure
+      for (let i = 1; i < a.length; i++) {
+        const gap = (a[i].ts - a[i - 1].ts) / 1000;
+        total += gap <= stats.GAP_CAP ? gap : focused(a[i]);
+      }
+      return total;
+    },
+
     studyVsAccuracy(attempts, type) {
       const f = (type ? attempts.filter((a) => a.type === type) : attempts).filter((a) => a.scored);
       return f.map((a) => ({ x: a.studySec, y: a.score }));
@@ -6520,8 +6540,13 @@ window.ATELIER_REFS = [{"id": "ws-lines-1","title": "Straight lines \u2014 set 1
     // time per day — answers "how long today?" and shows the rhythm at a glance
     const cal = A.habit.calendar(14);
     const timeSeries = cal.map((d) => ({ day: d.day, mins: d.secs / 60, met: d.met }));
-    const todayMin = A.habit.todayMinutes();
     const weekMin = cal.slice(-7).reduce((s, d) => s + d.secs / 60, 0);
+    // engaged (elapsed-while-working) answers "how long did I spend"; focused
+    // (study+draw) is the subset with the pencil actually moving. Both derived
+    // from today's attempts so they share one source and agree.
+    const todayAtts = all.filter((a) => a.day === A.habit.today());
+    const focusedMin = todayAtts.reduce((s, a) => s + ((a.studySec || 0) + (a.drawSec || 0)) / 60, 0);
+    const engagedMin = A.stats.engagedSeconds(all, A.habit.today()) / 60;
     // a minutes goal line only makes sense in minutes-goal mode; the default is
     // plan-based (the daily plan is deliberately short — distributed practice —
     // so a 15-min line it can't reach would just read as perpetual failure)
@@ -6531,8 +6556,8 @@ window.ATELIER_REFS = [{"id": "ws-lines-1","title": "Straight lines \u2014 set 1
     // and thinking between marks aren't counted, so this reads lower than the
     // time on the clock — by design (it measures practice, not screen time)
     const timeSub = minutesMode
-      ? `today <b>${fmtMin(todayMin)}</b> focused · past 7 days <b>${fmtMin(weekMin)}</b> · goal ${goalMin} min/day`
-      : `today <b>${fmtMin(todayMin)}</b> focused · past 7 days <b>${fmtMin(weekMin)}</b> · <span title="active study + drawing time, not screen time">study + drawing only</span>`;
+      ? `today <b>${fmtMin(engagedMin)}</b> at the easel <span class="muted">(${fmtMin(focusedMin)} focused)</span> · past 7 days <b>${fmtMin(weekMin)}</b> focused · goal ${goalMin} min/day`
+      : `today <b>${fmtMin(engagedMin)}</b> at the easel <span title="elapsed time while working — drawing, guessing, reading the reveal">·</span> <span class="muted">${fmtMin(focusedMin)} of it pencil-on-paper</span>`;
     const timeCard = `<div class="card"><h2>Practice time</h2>
       <div class="small muted">${timeSub}</div>
       ${A.charts.dayTime(timeSeries, { goal: minutesMode ? goalMin : 0 })}</div>`;
@@ -7036,8 +7061,8 @@ window.ATELIER_REFS = [{"id": "ws-lines-1","title": "Straight lines \u2014 set 1
   'use strict';
   // Stamped by build/build.js: A.VERSION from build/version.json, A.BUILD from
   // the build clock (YYMMDD.HHMM). These literals are only the un-built dev fallback.
-  A.VERSION = '1.15.1';
-  A.BUILD = '260708.2208';
+  A.VERSION = '1.16.0';
+  A.BUILD = '260708.2217';
   function boot() {
     try { A.ui.init(); }
     catch (e) {

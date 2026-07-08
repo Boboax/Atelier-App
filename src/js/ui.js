@@ -1480,8 +1480,13 @@
     // time per day — answers "how long today?" and shows the rhythm at a glance
     const cal = A.habit.calendar(14);
     const timeSeries = cal.map((d) => ({ day: d.day, mins: d.secs / 60, met: d.met }));
-    const todayMin = A.habit.todayMinutes();
     const weekMin = cal.slice(-7).reduce((s, d) => s + d.secs / 60, 0);
+    // engaged (elapsed-while-working) answers "how long did I spend"; focused
+    // (study+draw) is the subset with the pencil actually moving. Both derived
+    // from today's attempts so they share one source and agree.
+    const todayAtts = all.filter((a) => a.day === A.habit.today());
+    const focusedMin = todayAtts.reduce((s, a) => s + ((a.studySec || 0) + (a.drawSec || 0)) / 60, 0);
+    const engagedMin = A.stats.engagedSeconds(all, A.habit.today()) / 60;
     // a minutes goal line only makes sense in minutes-goal mode; the default is
     // plan-based (the daily plan is deliberately short — distributed practice —
     // so a 15-min line it can't reach would just read as perpetual failure)
@@ -1491,8 +1496,8 @@
     // and thinking between marks aren't counted, so this reads lower than the
     // time on the clock — by design (it measures practice, not screen time)
     const timeSub = minutesMode
-      ? `today <b>${fmtMin(todayMin)}</b> focused · past 7 days <b>${fmtMin(weekMin)}</b> · goal ${goalMin} min/day`
-      : `today <b>${fmtMin(todayMin)}</b> focused · past 7 days <b>${fmtMin(weekMin)}</b> · <span title="active study + drawing time, not screen time">study + drawing only</span>`;
+      ? `today <b>${fmtMin(engagedMin)}</b> at the easel <span class="muted">(${fmtMin(focusedMin)} focused)</span> · past 7 days <b>${fmtMin(weekMin)}</b> focused · goal ${goalMin} min/day`
+      : `today <b>${fmtMin(engagedMin)}</b> at the easel <span title="elapsed time while working — drawing, guessing, reading the reveal">·</span> <span class="muted">${fmtMin(focusedMin)} of it pencil-on-paper</span>`;
     const timeCard = `<div class="card"><h2>Practice time</h2>
       <div class="small muted">${timeSub}</div>
       ${A.charts.dayTime(timeSeries, { goal: minutesMode ? goalMin : 0 })}</div>`;
