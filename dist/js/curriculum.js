@@ -316,7 +316,9 @@
       for (let i = n - 1; i >= 0; i--) {
         const k = dayOffset(-i);
         const day = this.data().days[k] || { count: 0, secs: 0 };
-        out.push({ day: k, secs: day.secs, count: day.count, met: (day.secs / 60) >= this.goalMin() });
+        // met = the REAL daily goal (plan completed OR minutes hit) — not raw
+        // minutes, or a plan-based day finished in 4 min reads as "missed"
+        out.push({ day: k, secs: day.secs, count: day.count, met: this.metGoalOn(k) });
       }
       return out;
     }
