@@ -19,6 +19,10 @@ No feature reaches `main` without a version bump.
 
 ---
 
+## 1.16.0 — Time at the easel
+
+"How long did I spend?" now has an honest answer. The app only ever logged *focused* time (study + drawing), which undercounts the real sitting — so the Practice-time card now leads with **time at the easel**: the elapsed time you were actually working, reconstructed from the timestamp on every drill (gaps between drills count as practice — drawing, guessing, reading the reveal; a gap over 5 minutes is treated as a break, not practice). Focused time is shown beside it as the pencil-actually-moving subset. Because it's rebuilt from timestamps, it works for past days too, no new tracking needed.
+
 ## 1.15.1 — What "practice time" counts
 
 Two clarity fixes after the number read as suspiciously low. The minutes shown are **focused time** — active study + drawing only, not screen time; reading feedback and thinking between marks aren't counted (by design — it measures practice, not time on the app), so a short daily plan legitimately logs only a few minutes. Labels now say "focused" and drop the misleading 15-min goal line in plan mode (the default): the daily plan is deliberately brief, so a line it can't reach just read as perpetual failure. Also fixed: the day-dots and the practice-time bars marked plan-completed days as "missed" whenever they were under the raw minutes goal — they now honour the real goal (plan completed OR minutes hit), matching the streak.

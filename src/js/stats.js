@@ -67,6 +67,26 @@
       return { kind: 'shape', n: f.length, aspect: { mean: +mean(asp).toFixed(1), samples: asp } };
     },
 
+    // ENGAGED time for a day, reconstructed from attempt timestamps — the real
+    // "how long was I working at it", which the per-drill focused clock (study +
+    // draw only) undercounts. The gap between consecutive attempts is the time
+    // that produced the later one (drawing, guessing, reading the reveal), so we
+    // sum those gaps; a gap over GAP_CAP means you put it down and came back
+    // (a break, not practice) so it's replaced by just that drill's focused time.
+    // Works retroactively — no new data, only the ts already on every attempt.
+    GAP_CAP: 300,   // seconds; > 5 min between drills = a break, not a pause
+    engagedSeconds(attempts, dayKey) {
+      const a = attempts.filter((x) => x.day === dayKey && x.ts != null).sort((p, q) => p.ts - q.ts);
+      if (!a.length) return 0;
+      const focused = (x) => (x.studySec || 0) + (x.drawSec || 0) || 12;   // fallback ~12s
+      let total = focused(a[0]);   // first drill has no preceding gap to measure
+      for (let i = 1; i < a.length; i++) {
+        const gap = (a[i].ts - a[i - 1].ts) / 1000;
+        total += gap <= stats.GAP_CAP ? gap : focused(a[i]);
+      }
+      return total;
+    },
+
     studyVsAccuracy(attempts, type) {
       const f = (type ? attempts.filter((a) => a.type === type) : attempts).filter((a) => a.scored);
       return f.map((a) => ({ x: a.studySec, y: a.score }));
