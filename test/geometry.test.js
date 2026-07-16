@@ -178,30 +178,29 @@ test('distToSeg: segment distance, not infinite-line distance', () => {
   assert.ok(Math.abs(g.distToSeg([0.3, 0.4], [0.3, 0.1], [0.3, 0.1]) - 0.3) < 1e-9, 'degenerate segment = point');
 });
 
-// regression: dotting the start/apex/end first (as the coach advises) then
-// drawing the curve through them must score the CURVE, not a zig-zag through
-// the dots. A near-perfect copy with three dot-strokes scored 0 before openPath.
-test('openPath: dots + a curve stroke score the curve, not the dots', () => {
+// scoreCurve is ORDER-INDEPENDENT: it accepts the raw strokes and scores by
+// shape, so however the marks were laid down — dots, several pieces, overlapping
+// retraced sketching — a faithful curve scores like the curve. Both reported
+// zero-score bugs (dots in front; overlapping strokes) live here.
+test('scoreCurve: robust to dots, pieces and overlapping strokes', () => {
   const g = load().geom;
   const T = [[0.15, 0.4], [0.35, 0.72], [0.5, 0.82], [0.65, 0.72], [0.85, 0.4]];   // a U
-  const curve = T.map((p) => [p[0] + 0.01, p[1] + 0.01]);                          // close copy stroke
-  const dotStart = [[0.15, 0.4], [0.151, 0.401]];   // tiny dot strokes at end/apex/end
-  const dotApex  = [[0.5, 0.82], [0.501, 0.821]];
-  const dotEnd   = [[0.85, 0.4], [0.851, 0.401]];
-  // as drawn: dots first, then the curve (worst case for naive concatenation)
-  const strokes = [dotStart, dotApex, dotEnd, curve];
-  const path = g.openPath(strokes);
-  // the reconstructed path is essentially just the curve stroke (dots dropped)
-  assert.ok(path.length === curve.length, 'dots dropped, curve kept: ' + path.length);
-  const scored = g.scoreCurve(T, path).score;
-  assert.ok(scored >= 85, 'dots+curve scores like the curve: ' + scored);
-  // vs the old naive concatenation, which scrambled the path
-  const naive = [];
-  for (const s of strokes) for (const p of s) naive.push(p);
-  assert.ok(g.scoreCurve(T, naive).score < scored, 'naive concat scored worse (the bug)');
-  // a single-stroke curve is unaffected
-  assert.deepEqual(g.openPath([curve]), curve);
-  // a curve drawn in two halves chains into one path
-  const left = T.slice(0, 3), right = T.slice(2);
-  assert.ok(g.scoreCurve(T, g.openPath([left, right])).score >= 90, 'two-piece curve chains');
+  const near = (seg, d) => seg.map((p) => [p[0] + (d || 0.008), p[1] + (d || 0.008)]);
+  // a single clean copy
+  assert.ok(g.scoreCurve(T, near(T)).score >= 88, 'clean copy high');
+  // anchor dots first, then the curve (the 1.14.2 case)
+  const dots = [[[0.15, 0.4], [0.151, 0.401]], [[0.5, 0.82], [0.5, 0.82]], [[0.85, 0.4], [0.851, 0.4]]];
+  assert.ok(g.scoreCurve(T, dots.concat([near(T)])).score >= 85, 'dots + curve');
+  // built from several overlapping / out-of-order / retraced strokes (the report)
+  const c = near(T);
+  const messy = [c.slice(2, 5), c.slice(0, 3), c.slice(3), c.slice(1, 4)];
+  assert.ok(g.scoreCurve(T, messy).score >= 82, 'overlapping multi-stroke curve: ' + g.scoreCurve(T, messy).score);
+  // an L-shaped bend (steep drop then flat), same messy construction
+  const L = [[0.12, 0.15], [0.20, 0.45], [0.30, 0.66], [0.45, 0.76], [0.62, 0.78], [0.80, 0.78]];
+  const lc = near(L, 0.006);
+  const Lmessy = [lc.slice(2, 5), lc.slice(0, 3), lc.slice(4), lc.slice(1, 4)];
+  assert.ok(g.scoreCurve(L, Lmessy).score >= 80, 'L-bend multi-stroke: ' + g.scoreCurve(L, Lmessy).score);
+  // shape still discriminates: a straight line across a bowed target scores low
+  const straight = [[0.15, 0.4], [0.85, 0.4]];
+  assert.ok(g.scoreCurve(T, straight).score < 82, 'straight penalised: ' + g.scoreCurve(T, straight).score);
 });

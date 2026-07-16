@@ -836,30 +836,41 @@ window.ATELIER_REFS = [{"id": "ws-lines-1","title": "Straight lines \u2014 set 1
   // the curve itself, not the dots concatenated in front of it (that spliced a
   // zig-zag into the path and scored a perfect curve as 0). Drop the negligible
   // strokes, then chain the substantive ones end-to-nearest-end into one path.
-  geom.openPath = function (strokes) {
+  // Order a point cloud along its principal span: project every point onto the
+  // axis between the two farthest-apart points and sort. This recovers the path
+  // ordering from GEOMETRY, not from stroke sequence — so it doesn't matter that
+  // the marks were laid down as several overlapping, back-and-forth strokes. It
+  // is correct for any curve that is monotonic along its own span (all this
+  // drill's single-bow curves and terminator arcs; a U is monotonic in x).
+  geom.orderAlongAxis = function (pts) {
+    if (!pts || pts.length < 3) return (pts || []).slice();
+    let seed = pts[0];
+    for (const p of pts) if (p[0] + p[1] < seed[0] + seed[1]) seed = p;
+    const far = (from) => { let b = from, d = -1; for (const p of pts) { const e = (p[0] - from[0]) ** 2 + (p[1] - from[1]) ** 2; if (e > d) { d = e; b = p; } } return b; };
+    const a = far(seed), b = far(a);                 // ends of the longest span
+    const ux = b[0] - a[0], uy = b[1] - a[1];
+    return pts.slice().sort((p, q) => ((p[0] - a[0]) * ux + (p[1] - a[1]) * uy) - ((q[0] - a[0]) * ux + (q[1] - a[1]) * uy));
+  };
+
+  // Reconstruct one open curve from possibly several strokes. The atelier method
+  // (and our coaching) is to dot the start/apex/end and build the line from a few
+  // marks — so ordered-polyline scorers must see the intended curve, not the dot
+  // strokes or the raw stroke sequence (either scored a perfect curve as 0). Drop
+  // negligible "dot" strokes; then, because stroke ORDER can't be trusted when a
+  // line is built from overlapping/retraced marks, recover the ordering from the
+  // geometry (axisOrder) rather than chaining. Single-stroke input keeps its drawn
+  // order unless axisOrder is forced (gesture may fold back on itself; curve and
+  // terminator are single-bow, so they always axis-order — robust to scribbles).
+  geom.openPath = function (strokes, axisOrder) {
     const subs = (strokes || []).filter((s) => s && s.length >= 2);
     if (!subs.length) { const all = []; for (const s of (strokes || [])) for (const p of s) all.push(p); return all; }
     const len = (s) => geom.pathLength(s);
     const maxLen = Math.max.apply(null, subs.map(len));
     let keep = subs.filter((s) => len(s) >= 0.15 * maxLen && len(s) > 1e-4);   // a dot has ~0 arc length
     if (!keep.length) keep = [subs.reduce((a, b) => (len(b) > len(a) ? b : a))];
-    if (keep.length === 1) return keep[0].slice();
-    // several real strokes (curve drawn in pieces) → greedy-chain by nearest end
-    const rem = keep.slice().sort((a, b) => (a[0][0] + a[0][1]) - (b[0][0] + b[0][1]));
-    let path = rem.shift().slice();
-    while (rem.length) {
-      const tail = path[path.length - 1];
-      let bi = 0, flip = false, bd = Infinity;
-      for (let i = 0; i < rem.length; i++) {
-        const s = rem[i];
-        const dS = geom.dist(tail, s[0]), dE = geom.dist(tail, s[s.length - 1]);
-        if (dS < bd) { bd = dS; bi = i; flip = false; }
-        if (dE < bd) { bd = dE; bi = i; flip = true; }
-      }
-      let s = rem.splice(bi, 1)[0];
-      path = path.concat(flip ? s.slice().reverse() : s);
-    }
-    return path;
+    if (keep.length === 1 && !axisOrder) return keep[0].slice();
+    const all = []; for (const s of keep) for (const p of s) all.push(p);
+    return geom.orderAlongAxis(all);
   };
 
   // Similarity transform mapping P's endpoints onto Q's (translate+rotate+scale).
@@ -872,54 +883,94 @@ window.ATELIER_REFS = [{"id": "ws-lines-1","title": "Straight lines \u2014 set 1
     const c = Math.cos(ang) * s, sn = Math.sin(ang) * s;
     return P.map((p) => { const dx = p[0] - p0[0], dy = p[1] - p0[1]; return [q0[0] + c * dx - sn * dy, q0[1] + sn * dx + c * dy]; });
   }
-  // Score an OPEN curve / line of action by how faithfully its BOW matches the
-  // target between the same endpoints. We align endpoints (so position, size and
-  // orientation don't matter — a memory drawing may be bigger or shifted), resolve
-  // draw direction by gross flow, then measure ordered point-to-point deviation
-  // normalized by the chord. This correctly penalises a too-straight line, a bow
-  // in the wrong place, or an opposite bend — which bbox+nearest-point scoring
-  // let slide (a straight line used to score ~97 against an S-curve).
+  /* ---- ORDER-INDEPENDENT open-curve scoring -------------------------------
+     A curve drawn from memory arrives as ANY number of strokes — one clean
+     sweep, a few segments, or a bundle of overlapping/retraced marks (and often
+     anchor dots). Reconstructing a single ordered path from that is fragile
+     (chaining scrambles overlaps; axis-sorting scrambles curves that fold along
+     their span) — and it once scored a near-perfect copy as 0. So we DON'T order
+     the marks. We compare the drawn geometry to the target as a symmetric
+     point-to-PATH distance: every user point's distance to the target polyline
+     (did you stray off it?) and every target sample's distance to the nearest
+     user stroke (did you cover it?). Each stroke keeps its own internal order —
+     which is always reliable — but stroke order/count never matters. Overlaps and
+     dots cost nothing; a too-straight line, a misplaced bow or an opposite bend
+     are still penalised in the coverage term.                                 */
+  // accept a flat polyline [[x,y],…] OR an array of strokes [[[x,y]…],…]
+  function asStrokes(u) {
+    if (!u || !u.length) return [];
+    return (Array.isArray(u[0]) && Array.isArray(u[0][0])) ? u.filter((s) => s && s.length) : [u];
+  }
+  function flat(strokes) { const a = []; for (const s of strokes) for (const p of s) a.push(p); return a; }
+  function distToPolyline(p, poly) {
+    if (poly.length === 1) return geom.dist(p, poly[0]);
+    let m = Infinity;
+    for (let i = 1; i < poly.length; i++) { const d = geom.distToSeg(p, poly[i - 1], poly[i]); if (d < m) m = d; }
+    return m;
+  }
+  function distToStrokes(p, strokes) { let m = Infinity; for (const s of strokes) { const d = distToPolyline(p, s); if (d < m) m = d; } return m; }
+  // symmetric mean point-to-path distance between the user's strokes and the
+  // target polyline (T = dense resample of it for the coverage direction)
+  function pathChamfer(strokes, targetPoly, T) {
+    let U = flat(strokes);
+    if (U.length > 220) { const step = Math.ceil(U.length / 220); U = U.filter((_, i) => i % step === 0); }
+    let su = 0; for (const u of U) su += distToPolyline(u, targetPoly); su /= (U.length || 1);
+    let st = 0; for (const t of T) st += distToStrokes(t, strokes); st /= (T.length || 1);
+    return 0.5 * (su + st);
+  }
+  // two extreme (farthest-apart) points of a cloud — the curve's span ends
+  function spanEnds(pts) {
+    let seed = pts[0];
+    for (const p of pts) if (p[0] + p[1] < seed[0] + seed[1]) seed = p;
+    const far = (f) => { let b = f, d = -1; for (const p of pts) { const e = (p[0] - f[0]) ** 2 + (p[1] - f[1]) ** 2; if (e > d) { d = e; b = p; } } return b; };
+    const a = far(seed); return [a, far(a)];
+  }
+  // similarity transform (translate+rotate+uniform scale) mapping a→qa, b→qb
+  function simTransform(a, b, qa, qb) {
+    const vpx = b[0] - a[0], vpy = b[1] - a[1], vqx = qb[0] - qa[0], vqy = qb[1] - qa[1];
+    const lp = Math.hypot(vpx, vpy) || 1e-6, lq = Math.hypot(vqx, vqy);
+    const s = lq / lp, ang = Math.atan2(vqy, vqx) - Math.atan2(vpy, vpx);
+    const c = Math.cos(ang) * s, sn = Math.sin(ang) * s;
+    return (p) => [qa[0] + c * (p[0] - a[0]) - sn * (p[1] - a[1]), qa[1] + sn * (p[0] - a[0]) + c * (p[1] - a[1])];
+  }
+
   geom.scoreCurve = function (targetPolyline, userPts) {
-    if (!userPts || userPts.length < 2 || extentOf(userPts) < MIN_EXTENT) {
-      return { score: 0, iou: 0, metrics: { degenerate: true } };
-    }
+    const strokes0 = asStrokes(userPts);
+    const U0 = flat(strokes0);
+    if (U0.length < 2 || extentOf(U0) < MIN_EXTENT) return { score: 0, iou: 0, metrics: { degenerate: true } };
     const N = 64;
     const T = geom.resample(targetPolyline, N);
-    let U = geom.resample(userPts, N);
-    const tvx = T[N - 1][0] - T[0][0], tvy = T[N - 1][1] - T[0][1];
-    const uvx = U[N - 1][0] - U[0][0], uvy = U[N - 1][1] - U[0][1];
-    if (tvx * uvx + tvy * uvy < 0) U = U.slice().reverse();   // drawn the other way → flip
     const bb = bbox(T);
-    const scale = Math.max(Math.hypot(tvx, tvy), 0.45 * Math.hypot(bb.w, bb.h), 1e-3);
-    const A = endpointAlign(U, T);
-    let s = 0; for (let i = 0; i < N; i++) s += Math.hypot(A[i][0] - T[i][0], A[i][1] - T[i][1]);
-    const dev = s / N / scale;
-    const score = Math.round(Math.max(0, Math.min(100, 100 - dev * 500)));
-    const iou = +(score / 100).toFixed(3);   // 0-1 similarity for coach thresholds
-    return { score, iou, metrics: { iou, dev: +dev.toFixed(4) } };
+    const scale = Math.max(geom.dist(T[0], T[N - 1]), 0.45 * Math.hypot(bb.w, bb.h), 1e-3);
+    // Align by bounding-box centre + UNIFORM scale (position & size invariant).
+    // No rotation — a memory copy is drawn upright/in place, and the bow's
+    // orientation is part of the answer — and no endpoint identification, which
+    // is unreliable on unordered marks and mis-fired on folded curves (a hook's
+    // farthest-apart points aren't its ends). Density-independent, so overlapping
+    // strokes don't skew it, and a mirror bend can't be flipped onto the target.
+    const ub = bbox(U0), tb = bbox(T);
+    const cu = [ub.minX + ub.w / 2, ub.minY + ub.h / 2], ct = [tb.minX + tb.w / 2, tb.minY + tb.h / 2];
+    const k = Math.hypot(tb.w, tb.h) / (Math.hypot(ub.w, ub.h) || 1e-6);
+    const tr = (p) => [ct[0] + (p[0] - cu[0]) * k, ct[1] + (p[1] - cu[1]) * k];
+    // small tolerance floor: a match within resampling / hand-tremor noise is
+    // perfect (keeps an exact copy at 100 without flattering real deviations)
+    const dev = Math.max(0, pathChamfer(strokes0.map((s) => s.map(tr)), targetPolyline, T) / scale - 0.004);
+    const score = Math.round(Math.max(0, Math.min(100, 100 - dev * 520)));
+    return { score, iou: +(score / 100).toFixed(3), metrics: { iou: +(score / 100).toFixed(3), dev: +dev.toFixed(4) } };
   };
 
-  /* ---- FIXED-POSITION curve scoring ---------------------------------------
-     Like scoreCurve but WITHOUT endpoint alignment: where the curve sits
-     matters. Used for the terminator drill — drawing the shadow boundary on
-     the wrong part of the form is a miss, even if the bow shape is right.
-     Deviation is normalised by scaleRef (e.g. the form's radius).            */
+  /* FIXED-POSITION variant: no alignment — where the curve sits matters (the
+     terminator drill). Same order-independent point-to-path distance, scaled by
+     scaleRef (the form's radius).                                             */
   geom.scoreCurveFixed = function (targetPolyline, userPts, scaleRef) {
-    if (!userPts || userPts.length < 2 || extentOf(userPts) < MIN_EXTENT) {
-      return { score: 0, iou: 0, metrics: { degenerate: true } };
-    }
+    const strokes = asStrokes(userPts);
+    const U = flat(strokes);
+    if (U.length < 2 || extentOf(U) < MIN_EXTENT) return { score: 0, iou: 0, metrics: { degenerate: true } };
     const N = 64;
     const T = geom.resample(targetPolyline, N);
-    let U = geom.resample(userPts, N);
-    const tvx = T[N - 1][0] - T[0][0], tvy = T[N - 1][1] - T[0][1];
-    const uvx = U[N - 1][0] - U[0][0], uvy = U[N - 1][1] - U[0][1];
-    if (tvx * uvx + tvy * uvy < 0) U = U.slice().reverse();   // drawn the other way → flip
-    const scale = Math.max(scaleRef || 0, 1e-3);
-    let s = 0; for (let i = 0; i < N; i++) s += Math.hypot(U[i][0] - T[i][0], U[i][1] - T[i][1]);
-    const dev = s / N / scale;
-    const score = Math.round(Math.max(0, Math.min(100, 100 - dev * 260)));
-    const iou = +(score / 100).toFixed(3);
-    return { score, iou, metrics: { iou, dev: +dev.toFixed(4) } };
+    const dev = pathChamfer(strokes, targetPolyline, T) / Math.max(scaleRef || 0, 1e-3);
+    const score = Math.round(Math.max(0, Math.min(100, 100 - dev * 170)));
+    return { score, iou: +(score / 100).toFixed(3), metrics: { iou: +(score / 100).toFixed(3), dev: +dev.toFixed(4) } };
   };
 
   /* ---- Convex hull (used by generators & for cleaning user polygons) ----- */
@@ -3756,16 +3807,17 @@ window.ATELIER_REFS = [{"id": "ws-lines-1","title": "Straight lines \u2014 set 1
         const tt = this.target.lines.slice().sort((a, b) => angOf(a) - angOf(b));
         r = A.geom.scoreAngles(tt, ut);
       } else if (this.exKey === 'curve') {
-        // openPath: dropping dots + chaining strokes, so dotting the start/end/apex
-        // first (as the coach advises) then drawing through them scores the CURVE
-        r = A.geom.scoreCurve(this.target.polyline, A.geom.openPath(strokes));
+        // pass the raw STROKES — scoreCurve is order-independent, so a curve built
+        // from several overlapping/retraced marks (or with anchor dots) scores by
+        // its shape, not by how the strokes happened to be laid down
+        r = A.geom.scoreCurve(this.target.polyline, strokes);
       } else if (this.exKey === 'gesture') {
-        r = A.geom.scoreCurve(this.target.loa, A.geom.openPath(strokes));
+        r = A.geom.scoreCurve(this.target.loa, strokes);
       } else if (this.exKey === 'shade') {
         // POSITION matters: the shadow line must sit in the right place ON the
         // form, so no endpoint alignment; deviation scaled by the form's radius
         const f = this.target.form;
-        r = A.geom.scoreCurveFixed(this.target.polyline, A.geom.openPath(strokes), Math.max(f.rx, f.ry) * 2);
+        r = A.geom.scoreCurveFixed(this.target.polyline, strokes, Math.max(f.rx, f.ry) * 2);
       } else {
         // score from ALL strokes combined (a shape drawn in several strokes is fine)
         r = A.geom.scoreShape(this.target.polygon, this.surface.pointsDesign());
@@ -7061,8 +7113,8 @@ window.ATELIER_REFS = [{"id": "ws-lines-1","title": "Straight lines \u2014 set 1
   'use strict';
   // Stamped by build/build.js: A.VERSION from build/version.json, A.BUILD from
   // the build clock (YYMMDD.HHMM). These literals are only the un-built dev fallback.
-  A.VERSION = '1.16.0';
-  A.BUILD = '260708.2217';
+  A.VERSION = '1.16.1';
+  A.BUILD = '260716.2157';
   function boot() {
     try { A.ui.init(); }
     catch (e) {
