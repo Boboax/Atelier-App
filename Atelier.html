@@ -5391,7 +5391,6 @@ window.ATELIER_REFS = [{"id": "ws-lines-1","title": "Straight lines \u2014 set 1
     const ach = A.game.check(allAtts);
     const streak = A.habit.streak();
     const bestStreak = A.store.get('bestStreak', 0);
-    const mins = A.habit.todayMinutes();
     const sv = savedSession();
 
     // ---- today's plan: the one decision Home must support ----
@@ -5426,7 +5425,7 @@ window.ATELIER_REFS = [{"id": "ws-lines-1","title": "Straight lines \u2014 set 1
       ${resumeRow}
       <div class="row between center" style="margin-top:10px">
         <div class="pdots">${dots}</div>
-        <span class="tiny muted" title="active study + drawing time, not screen time">${fmtMin(mins)} focused · ${A.habit.todayCount()} drills</span>
+        <span class="tiny muted" title="elapsed time you were working — drawing, guessing, reading the reveal (breaks over 5 min don't count)">${fmtMin(A.stats.engagedSeconds(allAtts, A.habit.today()) / 60)} at the easel · ${A.habit.todayCount()} drills</span>
       </div></div>`;
 
     // ---- progression snapshot: the drill nearest promotion + compact levels ----
@@ -7113,8 +7112,8 @@ window.ATELIER_REFS = [{"id": "ws-lines-1","title": "Straight lines \u2014 set 1
   'use strict';
   // Stamped by build/build.js: A.VERSION from build/version.json, A.BUILD from
   // the build clock (YYMMDD.HHMM). These literals are only the un-built dev fallback.
-  A.VERSION = '1.16.1';
-  A.BUILD = '260716.2157';
+  A.VERSION = '1.16.2';
+  A.BUILD = '260803.2137';
   function boot() {
     try { A.ui.init(); }
     catch (e) {
