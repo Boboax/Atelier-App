@@ -279,7 +279,6 @@
     const ach = A.game.check(allAtts);
     const streak = A.habit.streak();
     const bestStreak = A.store.get('bestStreak', 0);
-    const mins = A.habit.todayMinutes();
     const sv = savedSession();
 
     // ---- today's plan: the one decision Home must support ----
@@ -314,7 +313,7 @@
       ${resumeRow}
       <div class="row between center" style="margin-top:10px">
         <div class="pdots">${dots}</div>
-        <span class="tiny muted" title="active study + drawing time, not screen time">${fmtMin(mins)} focused · ${A.habit.todayCount()} drills</span>
+        <span class="tiny muted" title="elapsed time you were working — drawing, guessing, reading the reveal (breaks over 5 min don't count)">${fmtMin(A.stats.engagedSeconds(allAtts, A.habit.today()) / 60)} at the easel · ${A.habit.todayCount()} drills</span>
       </div></div>`;
 
     // ---- progression snapshot: the drill nearest promotion + compact levels ----

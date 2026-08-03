@@ -19,6 +19,10 @@ No feature reaches `main` without a version bump.
 
 ---
 
+## 1.16.2 — One time, everywhere
+
+The timer felt off because Home and Stats disagreed: Home's plan card showed *focused* time (the small pencil-moving figure) while Stats showed *time at the easel* (the real elapsed sitting). Home now shows the same "at the easel" figure, from the same calculation — so "how long did I practice today" reads identically wherever you look.
+
 ## 1.16.1 — Curve scoring is order-independent
 
 The deeper fix behind the two "perfect curve scored 0" reports. Curve, gesture and terminator scoring compared your marks as a single ordered path — so building the line from several strokes (overlapping, retraced, out of order, or with anchor dots) produced a scrambled path and a 0, even when the drawing was near-perfect. Rewrote all three to score the drawn geometry **as shape, not as a sequence**: every mark's distance to the target curve, and the target's coverage by your marks, using each stroke's own order but never the order between strokes. Now it doesn't matter how you lay the curve down — one sweep or twenty overlapping strokes — a faithful curve scores faithfully. Fuzzed over 400 generated curves built from overlapping out-of-order strokes: no more spurious zeros; and getting the bow wrong (too shallow, flat, or an opposite bend) is still penalised properly.
