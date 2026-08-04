@@ -2444,27 +2444,39 @@ window.ATELIER_REFS = [{"id": "ws-lines-1","title": "Straight lines \u2014 set 1
   // plumb line, horizon, rule-of-thirds and a faint angle-clock ring — the
   // measuring scaffolds an atelier beginner is taught, faded out by level.
   Surface.prototype._drawGuides = function (ctx) {
+    // guides is a {thirds, clock, plumb} set (the drill withdraws them one per
+    // level); `true` means all of them (legacy / explicit "show me everything")
+    const g = this.guides === true ? { thirds: true, clock: true, plumb: true } : this.guides;
+    if (!g) return;
     const b = this.box, cx = b.x + b.s / 2, cy = b.y + b.s / 2;
     // one sepia guide ink at two weights: thirds whisper, plumb/horizon speak
     ctx.save();
-    ctx.strokeStyle = 'rgba(60,50,35,0.08)'; ctx.lineWidth = 1;
-    for (let i = 1; i < 3; i++) {
-      const x = b.x + b.s * i / 3, y = b.y + b.s * i / 3;
-      ctx.beginPath(); ctx.moveTo(x, b.y); ctx.lineTo(x, b.y + b.s); ctx.stroke();
-      ctx.beginPath(); ctx.moveTo(b.x, y); ctx.lineTo(b.x + b.s, y); ctx.stroke();
+    if (g.thirds) {
+      ctx.strokeStyle = 'rgba(60,50,35,0.08)'; ctx.lineWidth = 1;
+      for (let i = 1; i < 3; i++) {
+        const x = b.x + b.s * i / 3, y = b.y + b.s * i / 3;
+        ctx.beginPath(); ctx.moveTo(x, b.y); ctx.lineTo(x, b.y + b.s); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(b.x, y); ctx.lineTo(b.x + b.s, y); ctx.stroke();
+      }
     }
-    ctx.strokeStyle = 'rgba(60,50,35,0.13)';
-    ctx.beginPath(); ctx.moveTo(cx, b.y); ctx.lineTo(cx, b.y + b.s); ctx.stroke();
-    ctx.beginPath(); ctx.moveTo(b.x, cy); ctx.lineTo(b.x + b.s, cy); ctx.stroke();
-    // angle-clock ticks every 15°
-    const R = b.s * 0.13;
-    ctx.strokeStyle = 'rgba(60,50,35,0.13)';
-    for (let d = 0; d < 180; d += 15) {
-      const a = d * Math.PI / 180, c = Math.cos(a), s = Math.sin(a);
-      ctx.beginPath();
-      ctx.moveTo(cx + c * R * 0.82, cy + s * R * 0.82); ctx.lineTo(cx + c * R, cy + s * R);
-      ctx.moveTo(cx - c * R * 0.82, cy - s * R * 0.82); ctx.lineTo(cx - c * R, cy - s * R);
-      ctx.stroke();
+    if (g.plumb) {
+      ctx.lineWidth = 1;
+      ctx.strokeStyle = 'rgba(60,50,35,0.13)';
+      ctx.beginPath(); ctx.moveTo(cx, b.y); ctx.lineTo(cx, b.y + b.s); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(b.x, cy); ctx.lineTo(b.x + b.s, cy); ctx.stroke();
+    }
+    if (g.clock) {
+      // angle-clock ticks every 15°
+      const R = b.s * 0.13;
+      ctx.lineWidth = 1;
+      ctx.strokeStyle = 'rgba(60,50,35,0.13)';
+      for (let d = 0; d < 180; d += 15) {
+        const a = d * Math.PI / 180, c = Math.cos(a), s = Math.sin(a);
+        ctx.beginPath();
+        ctx.moveTo(cx + c * R * 0.82, cy + s * R * 0.82); ctx.lineTo(cx + c * R, cy + s * R);
+        ctx.moveTo(cx - c * R * 0.82, cy - s * R * 0.82); ctx.lineTo(cx - c * R, cy - s * R);
+        ctx.stroke();
+      }
     }
     ctx.restore();
   };
@@ -2724,6 +2736,38 @@ window.ATELIER_REFS = [{"id": "ws-lines-1","title": "Straight lines \u2014 set 1
     window(key) {
       const s = this._state();
       return (s[key] && s[key].window) || [];
+    },
+
+    /* Which sighting scaffolds to show, as {thirds, clock, plumb} (or null).
+       STAGED withdrawal, not a cliff: the guidance hypothesis says constant
+       support flatters performance while it's there and harms retention, so it
+       must come away — but taking all of it at once (as this used to, at level 4,
+       in the same step the study clock became an enforced countdown) stacks two
+       desirable difficulties in one moment. So one support leaves per level, in
+       order of crudeness: the thirds grid first, the angle clock next, and the
+       plumb line & horizon last — comparing a slant to true vertical/horizontal
+       IS the classical skill, so it earns the longest runway.
+       Bargue keeps everything: the plumb line is part of that construction. */
+    guideTier(key, level, mode) {
+      if (mode === 'off') return null;
+      const all = { thirds: true, clock: true, plumb: true };
+      if (mode === 'on') return all;
+      if (key === 'bargue') return all;
+      const d = BY_KEY[key];
+      if (!d || !d.scored) return null;
+      const l = level || 1;
+      // plumb/horizon survive through L4 on purpose: L4 is where the study clock
+      // becomes an enforced countdown, and two difficulties must not land in the
+      // same step. So L2 grid, L3 clock, L4 timer, L5 the last references.
+      const t = { thirds: l <= 1, clock: l <= 2, plumb: l <= 4 };
+      return (t.thirds || t.clock || t.plumb) ? t : null;
+    },
+    // the scaffold withdrawn ON reaching this level (for the level-up message)
+    guideDropped(key, level, mode) {
+      if (mode !== 'auto' || key === 'bargue') return '';
+      const d = BY_KEY[key];
+      if (!d || !d.scored) return '';
+      return { 2: 'the thirds grid', 3: 'the angle clock', 5: 'the plumb line & horizon' }[level] || '';
     },
     studySeconds(key) {
       const d = BY_KEY[key];
@@ -3597,17 +3641,16 @@ window.ATELIER_REFS = [{"id": "ws-lines-1","title": "Straight lines \u2014 set 1
   };
 
   // sighting training wheels: on by setting, auto-fading out as level rises
+  // which scaffolds this drill shows — staged by level (see curr.guideTier)
   Drill.prototype._computeGuides = function () {
-    const mode = A.store.get('guidesMode', 'auto');
-    if (mode === 'on') return true;
-    if (mode === 'off') return false;
-    // auto: scaffolds for beginners, and always for Bargue (the plumb/horizon are
-    // part of its construction method)
-    return (!!this.def.scored && this.level <= 3) || this.exKey === 'bargue';
+    return A.curr.guideTier(this.exKey, this.level, A.store.get('guidesMode', 'auto'));
   };
+  // an explicit tap asks for help, so it brings back ALL the scaffolds (and the
+  // level's staged set returns on the next figure)
   Drill.prototype.toggleGuides = function () {
-    this.surface.guides = !this.surface.guides; this.surface.redraw();
-    return this.surface.guides;
+    this.surface.guides = this.surface.guides ? null : { thirds: true, clock: true, plumb: true };
+    this.surface.redraw();
+    return !!this.surface.guides;
   };
 
   Drill.prototype._enterStudy = function () {
@@ -6261,10 +6304,14 @@ window.ATELIER_REFS = [{"id": "ws-lines-1","title": "Straight lines \u2014 set 1
     const atCap = lc && lc.changed && lc.dir > 0 && drill.def && lc.level >= (drill.def.maxLevel || 9);
     const pendMsg = lc && lc.pending
       ? `<div class="insight" style="text-align:left">◷ Level-up earned — pending a <b>cold retention check</b>. Pass tomorrow's recall of this drill to certify it (Lecoq's standard: memory across a night's sleep).</div>` : '';
+    // name the scaffold this level-up withdraws — a support taken away is
+    // progress, and saying so stops it reading as something breaking
+    const dropped = (lc && lc.changed && lc.dir > 0)
+      ? A.curr.guideDropped(drill.exKey, lc.level, A.store.get('guidesMode', 'auto')) : '';
     const lvlMsg = lc && lc.changed
       ? (atCap
         ? `<div class="insight" style="background:var(--warn);color:#fff">❖ Master’s mark — ${esc(drill.def.name)} held at the top level. From here, spaced reviews keep it sharp.</div>`
-        : `<div class="insight">${lc.dir > 0 ? '▲ Levelled up to ' + lc.level + ' — the study glance just got shorter.' : '▼ Eased to level ' + lc.level + ' to rebuild accuracy.'}</div>`)
+        : `<div class="insight">${lc.dir > 0 ? '▲ Levelled up to ' + lc.level + ' — the study glance just got shorter.' + (dropped ? ` ${esc(dropped)} comes away now — your eye holds that reference itself.` : '') : '▼ Eased to level ' + lc.level + ' to rebuild accuracy.'}</div>`)
       : '';
     // self-estimate vs actual (builds the internal error-detector)
     let estRow = '';
@@ -6956,7 +7003,7 @@ window.ATELIER_REFS = [{"id": "ws-lines-1","title": "Straight lines \u2014 set 1
         <div class="setrow"><div><div>Pace</div><div class="small muted">Relaxed stretches suggested study &amp; draw times by 50%</div></div>
           <button class="btn ghost sm" id="pacemode">${A.store.get('pace', 'standard') === 'relaxed' ? 'Relaxed' : 'Standard'}</button></div>
         <div class="setrow"><div><div>Sighting guides</div><div class="small muted">plumb line, horizon, thirds, angle ticks</div></div>
-          <button class="btn ghost sm" id="guidesmode">${esc({ auto: 'Auto (fades)', on: 'Always on', off: 'Off' }[A.store.get('guidesMode', 'auto')])}</button></div>
+          <button class="btn ghost sm" id="guidesmode">${esc({ auto: 'Auto (fades in stages)', on: 'Always on', off: 'Off' }[A.store.get('guidesMode', 'auto')])}</button></div>
         <div class="setrow"><div><div>Introduction</div><div class="small muted">replay the welcome guide</div></div>
           <button class="btn ghost sm" id="replayintro">Replay</button></div>
       </div>
@@ -7112,8 +7159,8 @@ window.ATELIER_REFS = [{"id": "ws-lines-1","title": "Straight lines \u2014 set 1
   'use strict';
   // Stamped by build/build.js: A.VERSION from build/version.json, A.BUILD from
   // the build clock (YYMMDD.HHMM). These literals are only the un-built dev fallback.
-  A.VERSION = '1.16.2';
-  A.BUILD = '260803.2137';
+  A.VERSION = '1.17.0';
+  A.BUILD = '260804.1906';
   function boot() {
     try { A.ui.init(); }
     catch (e) {

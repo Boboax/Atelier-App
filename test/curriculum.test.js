@@ -167,3 +167,36 @@ test('sightsize: in curriculum, outside the promotion machinery', () => {
   assert.ok(!A.curr.dueDrills('2026-01-05').some((x) => x.key === 'sightsize'),
     'never appears in the scored review queue');
 });
+
+// scaffolds are withdrawn ONE PER LEVEL, not all at once (guidance hypothesis:
+// support must fade, but stacking every removal into one step is a cliff)
+test('guideTier: staged withdrawal, crudest aid first, plumb last', () => {
+  const { A } = freshEnv(LOGIC);
+  const t = (lv) => A.curr.guideTier('line', lv, 'auto');
+  assert.deepEqual(t(1), { thirds: true, clock: true, plumb: true }, 'L1 fully scaffolded');
+  assert.deepEqual(t(2), { thirds: false, clock: true, plumb: true }, 'L2 loses the thirds grid');
+  assert.deepEqual(t(3), { thirds: false, clock: false, plumb: true }, 'L3 loses the angle clock');
+  // L4 is where the study clock becomes an enforced countdown — the last
+  // references stay so two difficulties don't land in the same step
+  assert.deepEqual(t(4), { thirds: false, clock: false, plumb: true }, 'L4 keeps plumb (timer step)');
+  assert.equal(t(5), null, 'L5 stands alone');
+  assert.equal(t(9), null);
+  // Bargue keeps everything — the plumb line is part of that construction method
+  assert.deepEqual(A.curr.guideTier('bargue', 9, 'auto'), { thirds: true, clock: true, plumb: true });
+  // explicit settings override the ladder in both directions
+  assert.equal(A.curr.guideTier('line', 1, 'off'), null);
+  assert.deepEqual(A.curr.guideTier('line', 9, 'on'), { thirds: true, clock: true, plumb: true });
+  // unscored reference drills have no generated target to scaffold
+  assert.equal(A.curr.guideTier('master', 1, 'auto'), null);
+});
+
+test('guideDropped names the support each level-up removes (auto only)', () => {
+  const { A } = freshEnv(LOGIC);
+  assert.match(A.curr.guideDropped('line', 2, 'auto'), /thirds/);
+  assert.match(A.curr.guideDropped('line', 3, 'auto'), /angle clock/);
+  assert.equal(A.curr.guideDropped('line', 4, 'auto'), '', 'L4 removes no guide (enforced timer instead)');
+  assert.match(A.curr.guideDropped('line', 5, 'auto'), /plumb/);
+  assert.equal(A.curr.guideDropped('line', 6, 'auto'), '', 'nothing left to remove');
+  assert.equal(A.curr.guideDropped('line', 2, 'on'), '', 'not when guides are pinned on');
+  assert.equal(A.curr.guideDropped('bargue', 2, 'auto'), '', 'bargue keeps its scaffolds');
+});

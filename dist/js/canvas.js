@@ -820,27 +820,39 @@
   // plumb line, horizon, rule-of-thirds and a faint angle-clock ring — the
   // measuring scaffolds an atelier beginner is taught, faded out by level.
   Surface.prototype._drawGuides = function (ctx) {
+    // guides is a {thirds, clock, plumb} set (the drill withdraws them one per
+    // level); `true` means all of them (legacy / explicit "show me everything")
+    const g = this.guides === true ? { thirds: true, clock: true, plumb: true } : this.guides;
+    if (!g) return;
     const b = this.box, cx = b.x + b.s / 2, cy = b.y + b.s / 2;
     // one sepia guide ink at two weights: thirds whisper, plumb/horizon speak
     ctx.save();
-    ctx.strokeStyle = 'rgba(60,50,35,0.08)'; ctx.lineWidth = 1;
-    for (let i = 1; i < 3; i++) {
-      const x = b.x + b.s * i / 3, y = b.y + b.s * i / 3;
-      ctx.beginPath(); ctx.moveTo(x, b.y); ctx.lineTo(x, b.y + b.s); ctx.stroke();
-      ctx.beginPath(); ctx.moveTo(b.x, y); ctx.lineTo(b.x + b.s, y); ctx.stroke();
+    if (g.thirds) {
+      ctx.strokeStyle = 'rgba(60,50,35,0.08)'; ctx.lineWidth = 1;
+      for (let i = 1; i < 3; i++) {
+        const x = b.x + b.s * i / 3, y = b.y + b.s * i / 3;
+        ctx.beginPath(); ctx.moveTo(x, b.y); ctx.lineTo(x, b.y + b.s); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(b.x, y); ctx.lineTo(b.x + b.s, y); ctx.stroke();
+      }
     }
-    ctx.strokeStyle = 'rgba(60,50,35,0.13)';
-    ctx.beginPath(); ctx.moveTo(cx, b.y); ctx.lineTo(cx, b.y + b.s); ctx.stroke();
-    ctx.beginPath(); ctx.moveTo(b.x, cy); ctx.lineTo(b.x + b.s, cy); ctx.stroke();
-    // angle-clock ticks every 15°
-    const R = b.s * 0.13;
-    ctx.strokeStyle = 'rgba(60,50,35,0.13)';
-    for (let d = 0; d < 180; d += 15) {
-      const a = d * Math.PI / 180, c = Math.cos(a), s = Math.sin(a);
-      ctx.beginPath();
-      ctx.moveTo(cx + c * R * 0.82, cy + s * R * 0.82); ctx.lineTo(cx + c * R, cy + s * R);
-      ctx.moveTo(cx - c * R * 0.82, cy - s * R * 0.82); ctx.lineTo(cx - c * R, cy - s * R);
-      ctx.stroke();
+    if (g.plumb) {
+      ctx.lineWidth = 1;
+      ctx.strokeStyle = 'rgba(60,50,35,0.13)';
+      ctx.beginPath(); ctx.moveTo(cx, b.y); ctx.lineTo(cx, b.y + b.s); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(b.x, cy); ctx.lineTo(b.x + b.s, cy); ctx.stroke();
+    }
+    if (g.clock) {
+      // angle-clock ticks every 15°
+      const R = b.s * 0.13;
+      ctx.lineWidth = 1;
+      ctx.strokeStyle = 'rgba(60,50,35,0.13)';
+      for (let d = 0; d < 180; d += 15) {
+        const a = d * Math.PI / 180, c = Math.cos(a), s = Math.sin(a);
+        ctx.beginPath();
+        ctx.moveTo(cx + c * R * 0.82, cy + s * R * 0.82); ctx.lineTo(cx + c * R, cy + s * R);
+        ctx.moveTo(cx - c * R * 0.82, cy - s * R * 0.82); ctx.lineTo(cx - c * R, cy - s * R);
+        ctx.stroke();
+      }
     }
     ctx.restore();
   };

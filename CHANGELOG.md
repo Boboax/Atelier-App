@@ -19,6 +19,17 @@ No feature reaches `main` without a version bump.
 
 ---
 
+## 1.17.0 — Guides fade in stages
+
+The sighting scaffolds used to vanish all at once at level 4 — the thirds grid, the angle clock *and* the plumb line & horizon — in the very same step the study clock became an enforced countdown. That's a cliff, and it stacked two desirable difficulties in one moment; the scaffolding literature (and the guidance hypothesis behind fading feedback) says supports should be withdrawn one at a time. They now come away in order of crudeness, one per level:
+
+- **Level 2** — the thirds grid goes (the crudest placement aid).
+- **Level 3** — the angle clock goes.
+- **Level 4** — nothing is withdrawn: this is where the study glance becomes an enforced countdown, and that step stands alone.
+- **Level 5** — the plumb line & horizon go last. Comparing a slant to true vertical/horizontal *is* the classical skill, so it gets the longest runway.
+
+Each level-up now names what it takes away ("the angle clock comes away now — your eye holds that reference itself"), so a vanished support reads as progress rather than something breaking. Bargue block-ins keep every scaffold permanently (the plumb line is part of that construction method), Settings still overrides with Always on / Off, and tapping **Guides** mid-drill brings all of them back for that figure.
+
 ## 1.16.2 — One time, everywhere
 
 The timer felt off because Home and Stats disagreed: Home's plan card showed *focused* time (the small pencil-moving figure) while Stats showed *time at the easel* (the real elapsed sitting). Home now shows the same "at the easel" figure, from the same calculation — so "how long did I practice today" reads identically wherever you look.

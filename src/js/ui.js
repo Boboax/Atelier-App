@@ -1149,10 +1149,14 @@
     const atCap = lc && lc.changed && lc.dir > 0 && drill.def && lc.level >= (drill.def.maxLevel || 9);
     const pendMsg = lc && lc.pending
       ? `<div class="insight" style="text-align:left">◷ Level-up earned — pending a <b>cold retention check</b>. Pass tomorrow's recall of this drill to certify it (Lecoq's standard: memory across a night's sleep).</div>` : '';
+    // name the scaffold this level-up withdraws — a support taken away is
+    // progress, and saying so stops it reading as something breaking
+    const dropped = (lc && lc.changed && lc.dir > 0)
+      ? A.curr.guideDropped(drill.exKey, lc.level, A.store.get('guidesMode', 'auto')) : '';
     const lvlMsg = lc && lc.changed
       ? (atCap
         ? `<div class="insight" style="background:var(--warn);color:#fff">❖ Master’s mark — ${esc(drill.def.name)} held at the top level. From here, spaced reviews keep it sharp.</div>`
-        : `<div class="insight">${lc.dir > 0 ? '▲ Levelled up to ' + lc.level + ' — the study glance just got shorter.' : '▼ Eased to level ' + lc.level + ' to rebuild accuracy.'}</div>`)
+        : `<div class="insight">${lc.dir > 0 ? '▲ Levelled up to ' + lc.level + ' — the study glance just got shorter.' + (dropped ? ` ${esc(dropped)} comes away now — your eye holds that reference itself.` : '') : '▼ Eased to level ' + lc.level + ' to rebuild accuracy.'}</div>`)
       : '';
     // self-estimate vs actual (builds the internal error-detector)
     let estRow = '';
@@ -1844,7 +1848,7 @@
         <div class="setrow"><div><div>Pace</div><div class="small muted">Relaxed stretches suggested study &amp; draw times by 50%</div></div>
           <button class="btn ghost sm" id="pacemode">${A.store.get('pace', 'standard') === 'relaxed' ? 'Relaxed' : 'Standard'}</button></div>
         <div class="setrow"><div><div>Sighting guides</div><div class="small muted">plumb line, horizon, thirds, angle ticks</div></div>
-          <button class="btn ghost sm" id="guidesmode">${esc({ auto: 'Auto (fades)', on: 'Always on', off: 'Off' }[A.store.get('guidesMode', 'auto')])}</button></div>
+          <button class="btn ghost sm" id="guidesmode">${esc({ auto: 'Auto (fades in stages)', on: 'Always on', off: 'Off' }[A.store.get('guidesMode', 'auto')])}</button></div>
         <div class="setrow"><div><div>Introduction</div><div class="small muted">replay the welcome guide</div></div>
           <button class="btn ghost sm" id="replayintro">Replay</button></div>
       </div>

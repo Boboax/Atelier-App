@@ -134,17 +134,16 @@
   };
 
   // sighting training wheels: on by setting, auto-fading out as level rises
+  // which scaffolds this drill shows — staged by level (see curr.guideTier)
   Drill.prototype._computeGuides = function () {
-    const mode = A.store.get('guidesMode', 'auto');
-    if (mode === 'on') return true;
-    if (mode === 'off') return false;
-    // auto: scaffolds for beginners, and always for Bargue (the plumb/horizon are
-    // part of its construction method)
-    return (!!this.def.scored && this.level <= 3) || this.exKey === 'bargue';
+    return A.curr.guideTier(this.exKey, this.level, A.store.get('guidesMode', 'auto'));
   };
+  // an explicit tap asks for help, so it brings back ALL the scaffolds (and the
+  // level's staged set returns on the next figure)
   Drill.prototype.toggleGuides = function () {
-    this.surface.guides = !this.surface.guides; this.surface.redraw();
-    return this.surface.guides;
+    this.surface.guides = this.surface.guides ? null : { thirds: true, clock: true, plumb: true };
+    this.surface.redraw();
+    return !!this.surface.guides;
   };
 
   Drill.prototype._enterStudy = function () {
