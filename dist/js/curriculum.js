@@ -102,6 +102,38 @@
       const s = this._state();
       return (s[key] && s[key].window) || [];
     },
+
+    /* Which sighting scaffolds to show, as {thirds, clock, plumb} (or null).
+       STAGED withdrawal, not a cliff: the guidance hypothesis says constant
+       support flatters performance while it's there and harms retention, so it
+       must come away — but taking all of it at once (as this used to, at level 4,
+       in the same step the study clock became an enforced countdown) stacks two
+       desirable difficulties in one moment. So one support leaves per level, in
+       order of crudeness: the thirds grid first, the angle clock next, and the
+       plumb line & horizon last — comparing a slant to true vertical/horizontal
+       IS the classical skill, so it earns the longest runway.
+       Bargue keeps everything: the plumb line is part of that construction. */
+    guideTier(key, level, mode) {
+      if (mode === 'off') return null;
+      const all = { thirds: true, clock: true, plumb: true };
+      if (mode === 'on') return all;
+      if (key === 'bargue') return all;
+      const d = BY_KEY[key];
+      if (!d || !d.scored) return null;
+      const l = level || 1;
+      // plumb/horizon survive through L4 on purpose: L4 is where the study clock
+      // becomes an enforced countdown, and two difficulties must not land in the
+      // same step. So L2 grid, L3 clock, L4 timer, L5 the last references.
+      const t = { thirds: l <= 1, clock: l <= 2, plumb: l <= 4 };
+      return (t.thirds || t.clock || t.plumb) ? t : null;
+    },
+    // the scaffold withdrawn ON reaching this level (for the level-up message)
+    guideDropped(key, level, mode) {
+      if (mode !== 'auto' || key === 'bargue') return '';
+      const d = BY_KEY[key];
+      if (!d || !d.scored) return '';
+      return { 2: 'the thirds grid', 3: 'the angle clock', 5: 'the plumb line & horizon' }[level] || '';
+    },
     studySeconds(key) {
       const d = BY_KEY[key];
       if (!d) return 30;
