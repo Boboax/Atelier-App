@@ -2774,7 +2774,12 @@ window.ATELIER_REFS = [{"id": "ws-lines-1","title": "Straight lines \u2014 set 1
        land in the same step. Returns the stage keys, or null = direct sweep. */
     curveStagePlan(level) {
       const l = level || 1;
-      if (l >= 7) return null;
+      // the direct sweep is earned ACROSS forms, not inside one drill: Speed's
+      // "break free of the scaffold" follows construction becoming habit, and
+      // in this curriculum that habit lives in polygons and envelopes. A curve
+      // grinder without established block-ins keeps the chord→round staging
+      // (promotion continues on the blended score; the sweep unlocks later).
+      if (l >= 7 && this.level('polygon') >= 3 && this.level('envelope') >= 3) return null;
       if (l >= 5) return ['chord', 'round'];
       return ['chord', 'facet', 'round'];
     },
@@ -5929,7 +5934,7 @@ window.ATELIER_REFS = [{"id": "ws-lines-1","title": "Straight lines \u2014 set 1
   const HOWTO = {
     line: 'Study the single line — its slant and its length. Hide it, then redraw it from memory anywhere on the canvas. Only angle and length are scored, not where you place it.',
     angles: 'Note how the lines relate — the angle between them and their relative lengths — not their position. Reproduce those relationships from memory.',
-    curve: 'Built the atelier way, in stages: study the curve, hide it, then from memory lay the CHORD (the straight between its ends), FACET the bend with straights at its tipping points, and only then ROUND the true curve through your scaffold. The chord and the final bow are scored (30/70) — a leaning chord costs you, because the construction inherits the scaffold’s error. From level 5 the facets are held in your head; from level 7 you commit the curve in one direct sweep.',
+    curve: 'Built the atelier way, in stages: study the curve, hide it, then from memory lay the CHORD (the straight between its ends), FACET the bend with straights at its tipping points, and only then ROUND the true curve through your scaffold. The chord and the final bow are scored (30/70) — a leaning chord costs you, because the construction inherits the scaffold’s error. From level 5 the facets are held in your head. The direct single sweep unlocks at level 7 — but only once Polygons and Complex Envelopes are established (level 3+): the freedom to leave the scaffold is earned across forms, not inside one drill.',
     polygon: 'Fix each corner’s position relative to the others. Block the whole shape in, then check its proportion before committing.',
     envelope: 'Find the outer “envelope” first — the largest straight lines that contain the form — then facet into smaller straights and round to the true contour, noticing where the edge turns sharply versus flows. General to specific.',
     gesture: 'A figure is shown as its line of action — one flowing line through the whole pose, with the head and main masses. Memorise that line, then draw it from memory in a single sweep. It’s the rhythm you’re after, not the outline; push the curve a little.',
@@ -7336,8 +7341,8 @@ window.ATELIER_REFS = [{"id": "ws-lines-1","title": "Straight lines \u2014 set 1
   'use strict';
   // Stamped by build/build.js: A.VERSION from build/version.json, A.BUILD from
   // the build clock (YYMMDD.HHMM). These literals are only the un-built dev fallback.
-  A.VERSION = '1.18.0';
-  A.BUILD = '260808.1731';
+  A.VERSION = '1.18.1';
+  A.BUILD = '260808.1925';
   function boot() {
     try { A.ui.init(); }
     catch (e) {
