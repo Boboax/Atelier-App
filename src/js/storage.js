@@ -114,6 +114,14 @@
       const all = await reqP(os.index('type').getAll(type));
       return all.filter((a) => ownAttempt(a)).map(normalizeAttempt);
     },
+    // merge a partial update into a stored attempt (used by data repairs)
+    async patchAttempt(id, patch) {
+      const os = await tx('attempts', 'readwrite');
+      const rec = await reqP(os.get(id));
+      if (!rec) return false;
+      await reqP(os.put(Object.assign(rec, patch)));
+      return true;
+    },
     async deleteAttempt(id) {
       const os = await tx('attempts', 'readwrite');
       return reqP(os.delete(id));
