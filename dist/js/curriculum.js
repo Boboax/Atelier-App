@@ -111,7 +111,12 @@
        land in the same step. Returns the stage keys, or null = direct sweep. */
     curveStagePlan(level) {
       const l = level || 1;
-      if (l >= 7) return null;
+      // the direct sweep is earned ACROSS forms, not inside one drill: Speed's
+      // "break free of the scaffold" follows construction becoming habit, and
+      // in this curriculum that habit lives in polygons and envelopes. A curve
+      // grinder without established block-ins keeps the chord→round staging
+      // (promotion continues on the blended score; the sweep unlocks later).
+      if (l >= 7 && this.level('polygon') >= 3 && this.level('envelope') >= 3) return null;
       if (l >= 5) return ['chord', 'round'];
       return ['chord', 'facet', 'round'];
     },

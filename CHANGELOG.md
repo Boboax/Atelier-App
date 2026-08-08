@@ -19,6 +19,10 @@ No feature reaches `main` without a version bump.
 
 ---
 
+## 1.18.1 — The direct sweep is earned across forms
+
+A sharp catch: the curve drill's summit (the direct single sweep, levels 7–9) could be reached by grinding one drill inside Module 1 — before ever blocking in a polygon or an envelope. That inverts the classical order: Speed's "break free of the scaffolding" follows construction becoming *habit across forms*, not mastery of one isolated exercise. The direct sweep now unlocks at curve level 7 **and** Polygons + Complex Envelopes both established (level 3+). Until then a high-level curve keeps the chord → round staging — promotion continues on the blended score, so nothing stalls; the sweep simply arrives when the block-in skill it presumes actually exists.
+
 ## 1.18.0 — Curves, built the atelier way
 
 The Curves drill contradicted the app's own teaching card ("straight lines first, curves last"): it asked for a freehand sweep while every source in this tradition — the FAA's Bargue coursework, Harold Speed's *Practice and Science of Drawing* — approaches a curve through straights: fix the extremities and tipping points with measurable lines, then round. But Speed also warns of students who never break free of the scaffold, so the drill wasn't removed — it was rebuilt as the construction *and* its withdrawal:

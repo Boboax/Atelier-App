@@ -241,9 +241,18 @@ test('repairOpenCurveScores: rescues bug victims, leaves honest scores alone', (
 
 // the curve construction ladder: full scaffold -> facets internalized -> direct
 // sweep; the facet withdrawal avoids L4 (the enforced-countdown step)
-test('curveStagePlan: staged at the bottom, direct sweep at the summit', () => {
+test('curveStagePlan: staged at the bottom; the direct sweep is earned ACROSS forms', () => {
   const { A } = freshEnv(LOGIC);
   for (const l of [1, 2, 3, 4]) assert.deepEqual(A.curr.curveStagePlan(l), ['chord', 'facet', 'round'], 'L' + l);
   for (const l of [5, 6]) assert.deepEqual(A.curr.curveStagePlan(l), ['chord', 'round'], 'L' + l);
-  for (const l of [7, 8, 9]) assert.equal(A.curr.curveStagePlan(l), null, 'L' + l);
+  // a curve grinder with no block-in practice does NOT unlock the direct sweep
+  for (const l of [7, 8, 9]) assert.deepEqual(A.curr.curveStagePlan(l), ['chord', 'round'], 'L' + l + ' gated');
+  // establish polygons + envelopes (level 3 each) → the sweep unlocks
+  const s = A.store.get('curriculum', {});
+  s.polygon = { level: 3, window: [] }; s.envelope = { level: 3, window: [] };
+  A.store.set('curriculum', s);
+  for (const l of [7, 8, 9]) assert.equal(A.curr.curveStagePlan(l), null, 'L' + l + ' unlocked');
+  // one established form is not enough
+  s.envelope = { level: 2, window: [] }; A.store.set('curriculum', s);
+  assert.deepEqual(A.curr.curveStagePlan(7), ['chord', 'round'], 'both forms required');
 });
