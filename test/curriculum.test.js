@@ -238,3 +238,12 @@ test('repairOpenCurveScores: rescues bug victims, leaves honest scores alone', (
   // nothing to repair → empty plan
   assert.deepEqual(A.curr.repairOpenCurveScores([att(9, 1, 90, [copy])]).updates, []);
 });
+
+// the curve construction ladder: full scaffold -> facets internalized -> direct
+// sweep; the facet withdrawal avoids L4 (the enforced-countdown step)
+test('curveStagePlan: staged at the bottom, direct sweep at the summit', () => {
+  const { A } = freshEnv(LOGIC);
+  for (const l of [1, 2, 3, 4]) assert.deepEqual(A.curr.curveStagePlan(l), ['chord', 'facet', 'round'], 'L' + l);
+  for (const l of [5, 6]) assert.deepEqual(A.curr.curveStagePlan(l), ['chord', 'round'], 'L' + l);
+  for (const l of [7, 8, 9]) assert.equal(A.curr.curveStagePlan(l), null, 'L' + l);
+});

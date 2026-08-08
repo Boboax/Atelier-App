@@ -21,6 +21,12 @@
         return 'Dialled in — angle and length both close.';
       }
       if (exKey === 'curve') {
+        // construction: the chord is the foundation — name its error first,
+        // because everything built on it inherits the lean
+        if (m.chordAngleErrDeg != null && Math.abs(m.chordAngleErrDeg) >= 4)
+          return `Your chord leaned ${Math.round(Math.abs(m.chordAngleErrDeg))}° ${m.chordAngleErrDeg > 0 ? 'clockwise' : 'anticlockwise'} — the whole construction inherits it. Fix the straight before the bend.`;
+        if (m.chordLenErrPct != null && Math.abs(m.chordLenErrPct) >= 8)
+          return `Your chord ran ${Math.round(Math.abs(m.chordLenErrPct))}% too ${m.chordLenErrPct > 0 ? 'long' : 'short'} — measure the span first; the bow can only be as true as its base.`;
         if (m.iou != null && m.iou < 0.6) return 'Follow the bend more closely — pin the start, end and apex (furthest bow) first.';
         return 'Nice curve — smooth and close to the path.';
       }
@@ -113,6 +119,7 @@
         if (a != null && Math.abs(a) >= 3) return coach.PRINCIPLES.angle;
         if (l != null && Math.abs(l) >= 6) return coach.PRINCIPLES.length;
       } else if (exKey === 'curve') {
+        if (m.chordAngleErrDeg != null && Math.abs(m.chordAngleErrDeg) >= 4) return coach.PRINCIPLES.angle;
         if (m.iou != null && m.iou < 0.75) return coach.PRINCIPLES.apex;
       } else if (exKey === 'gesture') {
         if (m.iou != null && m.iou < 0.8) return coach.PRINCIPLES.loa;

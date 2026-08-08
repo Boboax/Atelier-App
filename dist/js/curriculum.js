@@ -30,7 +30,7 @@
       blurb: 'Two or three lines from a shared vertex — judge the relative angles.',
       study: (l) => clamp(Math.round(13 - l), 3, 13), draw: 18, maxLevel: 9 },
     { key: 'curve', name: 'Curves', module: 1, scored: true,
-      blurb: 'Reproduce a curve from memory — fix its start, end and apex (its furthest bow).',
+      blurb: 'Build a curve the atelier way: chord first, straights at the tipping points, then the true bow — direct single-sweep at the top levels.',
       study: (l) => clamp(Math.round(12 - l), 3, 12), draw: 18, maxLevel: 9 },
     { key: 'polygon', name: 'Polygons', module: 2, scored: true, recallable: true,
       blurb: 'Closed straight-sided shapes, triangles to asymmetric n-gons.',
@@ -101,6 +101,19 @@
     window(key) {
       const s = this._state();
       return (s[key] && s[key].window) || [];
+    },
+
+    /* The curve drill's construction ladder (Speed / FAA: curves are approached
+       through straights — chord and tipping-point facets — and only rounded at
+       the end; but a student must eventually break FREE of the scaffold, so the
+       summit is the direct sweep). Facets leave at L5, not L4: L4 is where the
+       study clock becomes an enforced countdown, and two withdrawals must never
+       land in the same step. Returns the stage keys, or null = direct sweep. */
+    curveStagePlan(level) {
+      const l = level || 1;
+      if (l >= 7) return null;
+      if (l >= 5) return ['chord', 'round'];
+      return ['chord', 'facet', 'round'];
     },
 
     /* Which sighting scaffolds to show, as {thirds, clock, plumb} (or null).

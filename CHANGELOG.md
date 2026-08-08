@@ -19,6 +19,16 @@ No feature reaches `main` without a version bump.
 
 ---
 
+## 1.18.0 — Curves, built the atelier way
+
+The Curves drill contradicted the app's own teaching card ("straight lines first, curves last"): it asked for a freehand sweep while every source in this tradition — the FAA's Bargue coursework, Harold Speed's *Practice and Science of Drawing* — approaches a curve through straights: fix the extremities and tipping points with measurable lines, then round. But Speed also warns of students who never break free of the scaffold, so the drill wasn't removed — it was rebuilt as the construction *and* its withdrawal:
+
+- **Levels 1–4 — full construction, from memory**: study, hide, then **Chord** (the straight between the ends) → **Facet** (straights containing the bend at its tipping points) → **Round** (commit the true curve through your scaffold). Each stage gates on marks; no free peeks between stages.
+- **Levels 5–6 — chord → round**: the facets are now held in the head. (The facet stage leaves at L5, not L4 — L4 is the enforced-countdown step, and two withdrawals never land together.)
+- **Levels 7–9 — the direct sweep**: the old drill, as the summit. See it, hide it, commit it in one stroke — Speed's "break free of the scaffolding."
+
+Scoring follows what's measurable: the chord objectively (angle + length, 30%) and the final bow (70%); facets are working marks with no unique right answer, so they carry no score — their quality shows up in the bow. The reveal breaks out chord angle, chord length and bow match, and the coach names the classical lesson when it applies: a leaning chord means the whole construction inherits it. Module placement is unchanged and now load-bearing — stage 1 *is* the Lines skill, stage 2 *is* the Angle Relationships skill; Curves is where they compose.
+
 ## 1.17.1 — Repairing the mis-scored curves
 
 The ordered-path scoring bugs (fixed in 1.14.2 and 1.16.1) left their damage behind: bogus zeros sitting in attempt history and, worse, in the curve/gesture/terminator **promotion windows** — blocking level-ups and relaxing the difficulty staircase. Every attempt stores its target and strokes, so the ground truth survived. On first launch this version **rescores those attempts with the fixed scorer**, corrects any that were materially unfair (>10 points low), recomputes their self-estimate gaps, rebuilds the affected promotion windows from corrected history, and resets the study-clock staircase to neutral. Honest low scores are left exactly as they were — only bug victims are touched. One-time, per profile, with a toast reporting what was repaired.

@@ -30,6 +30,13 @@
              'Refine the key details from memory.']
   };
 
+  // the curve construction's stage instructions (keys from curr.curveStagePlan)
+  const CURVE_STAGE_TEXT = {
+    chord: 'Chord — one straight from where the curve starts to where it ends.',
+    facet: 'Facet — two or three straights that just contain the bend, turning at its tipping points.',
+    round: 'Round — commit the true curve through your scaffold, in one unhurried stroke.'
+  };
+
   function Drill(surface) {
     this.surface = surface;
     this.phase = 'idle';
@@ -238,7 +245,15 @@
     this.surface.clearMarks();
     this.surface.clearUndo();           // undo must not reach back past the phase change
     this.stages = (!this.def.scored && STAGES[this.exKey]) ? STAGES[this.exKey] : null;
+    // scored construction: the curve drill is staged (chord → facets → round)
+    // until the level ladder withdraws the scaffold (curr.curveStagePlan)
+    this.stageKeys = null;
+    if (this.exKey === 'curve') {
+      const plan = A.curr.curveStagePlan(this.level);
+      if (plan) { this.stageKeys = plan; this.stages = plan.map((k) => CURVE_STAGE_TEXT[k]); }
+    }
     this.stage = 0;
+    this._stageMarks = [];   // stroke-count boundaries at each stage transition
     // recall budget: soft target for committing the marks before the memory trace
     // fades (scored drills only — reference copies are deliberately unhurried)
     const dpace = A.store.get('pace', 'standard') === 'relaxed' ? 1.5 : 1;
@@ -259,10 +274,25 @@
     }, 200);
   };
 
-  // advance the guided block-in stage, with a brief re-glance at the reference
+  // advance the guided stage. Reference block-ins get a brief free re-glance;
+  // the scored construction does NOT — its marks come from memory, and a free
+  // peek between stages would quietly refund the challenge.
   Drill.prototype.nextStage = function () {
     if (!this.stages) return;
-    if (this.stage < this.stages.length - 1) { this.stage++; this.glance(1100, false); this._emit(); }
+    if (this.stage < this.stages.length - 1) {
+      this._stageMarks = this._stageMarks || [];
+      this._stageMarks.push(this.surface.strokesDesign().length);
+      this.stage++;
+      if (this.def.scored) this.surface.clearUndo();   // undo must not cross the stage boundary
+      else this.glance(1100, false);
+      this._emit();
+    }
+  };
+  // has the CURRENT stage received any marks yet? (gates Next stage / Evaluate)
+  Drill.prototype.stageHasMarks = function () {
+    if (!this.stages) return true;
+    const since = (this._stageMarks && this._stageMarks.length) ? this._stageMarks[this._stageMarks.length - 1] : 0;
+    return this.surface.strokesDesign().length > since;
   };
 
   Drill.prototype.glancesLeft = function () { return Math.max(0, (this.glanceCap || 0) - (this.glanceCount || 0)); };
@@ -343,10 +373,19 @@
         const tt = this.target.lines.slice().sort((a, b) => angOf(a) - angOf(b));
         r = A.geom.scoreAngles(tt, ut);
       } else if (this.exKey === 'curve') {
-        // pass the raw STROKES — scoreCurve is order-independent, so a curve built
-        // from several overlapping/retraced marks (or with anchor dots) scores by
-        // its shape, not by how the strokes happened to be laid down
-        r = A.geom.scoreCurve(this.target.polyline, strokes);
+        if (this.stageKeys && this._stageMarks && this._stageMarks.length) {
+          // staged construction: chord = the first stage's strokes, the bow =
+          // strokes after the last transition; facets between carry no score
+          const cut = Math.min(this._stageMarks[0], strokes.length);
+          const lastCut = Math.min(this._stageMarks[this._stageMarks.length - 1], strokes.length);
+          const chordStrokes = strokes.slice(0, cut);
+          const roundStrokes = strokes.slice(lastCut);
+          r = A.geom.scoreCurveConstruction(this.target.polyline, chordStrokes,
+                roundStrokes.length ? roundStrokes : strokes);
+        } else {
+          // direct sweep (level >= 7, or a recall): order-independent shape score
+          r = A.geom.scoreCurve(this.target.polyline, strokes);
+        }
       } else if (this.exKey === 'gesture') {
         r = A.geom.scoreCurve(this.target.loa, strokes);
       } else if (this.exKey === 'shade') {

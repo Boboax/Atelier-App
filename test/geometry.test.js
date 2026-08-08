@@ -204,3 +204,26 @@ test('scoreCurve: robust to dots, pieces and overlapping strokes', () => {
   const straight = [[0.15, 0.4], [0.85, 0.4]];
   assert.ok(g.scoreCurve(T, straight).score < 82, 'straight penalised: ' + g.scoreCurve(T, straight).score);
 });
+
+// staged construction scoring: chord (30%) + final bow (70%); facets unscored
+test('scoreCurveConstruction: chord errors cost, facets are free working marks', () => {
+  const g = load().geom;
+  const T = [[0.15, 0.4], [0.35, 0.72], [0.5, 0.82], [0.65, 0.72], [0.85, 0.4]];
+  const copy = T.map((p) => [p[0] + 0.006, p[1] + 0.006]);
+  const goodChord = [[[0.15, 0.4], [0.85, 0.4]]];
+  const perfect = g.scoreCurveConstruction(T, goodChord, [copy]);
+  assert.ok(perfect.score >= 95, 'true chord + faithful bow: ' + perfect.score);
+  assert.equal(perfect.metrics.construction, true);
+  assert.ok(Math.abs(perfect.metrics.chordAngleErrDeg) < 1);
+  // a leaning chord drags the blend down even with a perfect bow
+  const leaning = [[[0.15, 0.35], [0.85, 0.5]]];   // ~12° lean
+  const worse = g.scoreCurveConstruction(T, leaning, [copy]);
+  assert.ok(worse.score <= perfect.score - 8, 'chord lean costs: ' + worse.score);
+  assert.ok(Math.abs(worse.metrics.chordAngleErrDeg) > 8);
+  // missing chord = 0 for that stage, bow still carries its 70%
+  const noChord = g.scoreCurveConstruction(T, [], [copy]);
+  assert.ok(noChord.score >= 60 && noChord.score < perfect.score);
+  // a flat "curve" still fails the bow term
+  const flat = g.scoreCurveConstruction(T, goodChord, [[[0.15, 0.4], [0.85, 0.4]]]);
+  assert.ok(flat.score < 45, 'chord alone cannot pass: ' + flat.score);
+});
