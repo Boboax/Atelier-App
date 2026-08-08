@@ -959,6 +959,26 @@ window.ATELIER_REFS = [{"id": "ws-lines-1","title": "Straight lines \u2014 set 1
     return { score, iou: +(score / 100).toFixed(3), metrics: { iou: +(score / 100).toFixed(3), dev: +dev.toFixed(4) } };
   };
 
+  /* ---- staged curve construction (the atelier way) ------------------------
+     Chord and final bow are the two measurable stages; the facets between are
+     working marks with no unique right answer, so they carry no score — their
+     quality shows up in the bow. Blend 30/70: a leaning chord costs you, which
+     is the classical lesson (the construction inherits the scaffold's error). */
+  geom.scoreCurveConstruction = function (targetPolyline, chordStrokes, roundStrokes) {
+    const T = targetPolyline;
+    const tChord = [T[0], T[T.length - 1]];
+    const pts = [];
+    for (const s of (chordStrokes || [])) for (const p of s) pts.push(p);
+    const c = pts.length >= 2 ? geom.scoreLine(tChord, geom.bestFitSegment(pts))
+                              : { score: 0, metrics: { degenerate: true } };
+    const r = geom.scoreCurve(T, roundStrokes);
+    const score = Math.round(0.3 * c.score + 0.7 * r.score);
+    return { score, iou: r.iou, metrics: Object.assign({}, r.metrics, {
+      construction: true, chordScore: c.score, roundScore: r.score,
+      chordAngleErrDeg: c.metrics.angleErrDeg != null ? c.metrics.angleErrDeg : null,
+      chordLenErrPct: c.metrics.lengthErrPct != null ? c.metrics.lengthErrPct : null }) };
+  };
+
   /* FIXED-POSITION variant: no alignment — where the curve sits matters (the
      terminator drill). Same order-independent point-to-path distance, scaled by
      scaleRef (the form's radius).                                             */
@@ -2673,7 +2693,7 @@ window.ATELIER_REFS = [{"id": "ws-lines-1","title": "Straight lines \u2014 set 1
       blurb: 'Two or three lines from a shared vertex — judge the relative angles.',
       study: (l) => clamp(Math.round(13 - l), 3, 13), draw: 18, maxLevel: 9 },
     { key: 'curve', name: 'Curves', module: 1, scored: true,
-      blurb: 'Reproduce a curve from memory — fix its start, end and apex (its furthest bow).',
+      blurb: 'Build a curve the atelier way: chord first, straights at the tipping points, then the true bow — direct single-sweep at the top levels.',
       study: (l) => clamp(Math.round(12 - l), 3, 12), draw: 18, maxLevel: 9 },
     { key: 'polygon', name: 'Polygons', module: 2, scored: true, recallable: true,
       blurb: 'Closed straight-sided shapes, triangles to asymmetric n-gons.',
@@ -2744,6 +2764,19 @@ window.ATELIER_REFS = [{"id": "ws-lines-1","title": "Straight lines \u2014 set 1
     window(key) {
       const s = this._state();
       return (s[key] && s[key].window) || [];
+    },
+
+    /* The curve drill's construction ladder (Speed / FAA: curves are approached
+       through straights — chord and tipping-point facets — and only rounded at
+       the end; but a student must eventually break FREE of the scaffold, so the
+       summit is the direct sweep). Facets leave at L5, not L4: L4 is where the
+       study clock becomes an enforced countdown, and two withdrawals must never
+       land in the same step. Returns the stage keys, or null = direct sweep. */
+    curveStagePlan(level) {
+      const l = level || 1;
+      if (l >= 7) return null;
+      if (l >= 5) return ['chord', 'round'];
+      return ['chord', 'facet', 'round'];
     },
 
     /* Which sighting scaffolds to show, as {thirds, clock, plumb} (or null).
@@ -3084,6 +3117,12 @@ window.ATELIER_REFS = [{"id": "ws-lines-1","title": "Straight lines \u2014 set 1
         return 'Dialled in — angle and length both close.';
       }
       if (exKey === 'curve') {
+        // construction: the chord is the foundation — name its error first,
+        // because everything built on it inherits the lean
+        if (m.chordAngleErrDeg != null && Math.abs(m.chordAngleErrDeg) >= 4)
+          return `Your chord leaned ${Math.round(Math.abs(m.chordAngleErrDeg))}° ${m.chordAngleErrDeg > 0 ? 'clockwise' : 'anticlockwise'} — the whole construction inherits it. Fix the straight before the bend.`;
+        if (m.chordLenErrPct != null && Math.abs(m.chordLenErrPct) >= 8)
+          return `Your chord ran ${Math.round(Math.abs(m.chordLenErrPct))}% too ${m.chordLenErrPct > 0 ? 'long' : 'short'} — measure the span first; the bow can only be as true as its base.`;
         if (m.iou != null && m.iou < 0.6) return 'Follow the bend more closely — pin the start, end and apex (furthest bow) first.';
         return 'Nice curve — smooth and close to the path.';
       }
@@ -3176,6 +3215,7 @@ window.ATELIER_REFS = [{"id": "ws-lines-1","title": "Straight lines \u2014 set 1
         if (a != null && Math.abs(a) >= 3) return coach.PRINCIPLES.angle;
         if (l != null && Math.abs(l) >= 6) return coach.PRINCIPLES.length;
       } else if (exKey === 'curve') {
+        if (m.chordAngleErrDeg != null && Math.abs(m.chordAngleErrDeg) >= 4) return coach.PRINCIPLES.angle;
         if (m.iou != null && m.iou < 0.75) return coach.PRINCIPLES.apex;
       } else if (exKey === 'gesture') {
         if (m.iou != null && m.iou < 0.8) return coach.PRINCIPLES.loa;
@@ -3601,6 +3641,13 @@ window.ATELIER_REFS = [{"id": "ws-lines-1","title": "Straight lines \u2014 set 1
              'Refine the key details from memory.']
   };
 
+  // the curve construction's stage instructions (keys from curr.curveStagePlan)
+  const CURVE_STAGE_TEXT = {
+    chord: 'Chord — one straight from where the curve starts to where it ends.',
+    facet: 'Facet — two or three straights that just contain the bend, turning at its tipping points.',
+    round: 'Round — commit the true curve through your scaffold, in one unhurried stroke.'
+  };
+
   function Drill(surface) {
     this.surface = surface;
     this.phase = 'idle';
@@ -3809,7 +3856,15 @@ window.ATELIER_REFS = [{"id": "ws-lines-1","title": "Straight lines \u2014 set 1
     this.surface.clearMarks();
     this.surface.clearUndo();           // undo must not reach back past the phase change
     this.stages = (!this.def.scored && STAGES[this.exKey]) ? STAGES[this.exKey] : null;
+    // scored construction: the curve drill is staged (chord → facets → round)
+    // until the level ladder withdraws the scaffold (curr.curveStagePlan)
+    this.stageKeys = null;
+    if (this.exKey === 'curve') {
+      const plan = A.curr.curveStagePlan(this.level);
+      if (plan) { this.stageKeys = plan; this.stages = plan.map((k) => CURVE_STAGE_TEXT[k]); }
+    }
     this.stage = 0;
+    this._stageMarks = [];   // stroke-count boundaries at each stage transition
     // recall budget: soft target for committing the marks before the memory trace
     // fades (scored drills only — reference copies are deliberately unhurried)
     const dpace = A.store.get('pace', 'standard') === 'relaxed' ? 1.5 : 1;
@@ -3830,10 +3885,25 @@ window.ATELIER_REFS = [{"id": "ws-lines-1","title": "Straight lines \u2014 set 1
     }, 200);
   };
 
-  // advance the guided block-in stage, with a brief re-glance at the reference
+  // advance the guided stage. Reference block-ins get a brief free re-glance;
+  // the scored construction does NOT — its marks come from memory, and a free
+  // peek between stages would quietly refund the challenge.
   Drill.prototype.nextStage = function () {
     if (!this.stages) return;
-    if (this.stage < this.stages.length - 1) { this.stage++; this.glance(1100, false); this._emit(); }
+    if (this.stage < this.stages.length - 1) {
+      this._stageMarks = this._stageMarks || [];
+      this._stageMarks.push(this.surface.strokesDesign().length);
+      this.stage++;
+      if (this.def.scored) this.surface.clearUndo();   // undo must not cross the stage boundary
+      else this.glance(1100, false);
+      this._emit();
+    }
+  };
+  // has the CURRENT stage received any marks yet? (gates Next stage / Evaluate)
+  Drill.prototype.stageHasMarks = function () {
+    if (!this.stages) return true;
+    const since = (this._stageMarks && this._stageMarks.length) ? this._stageMarks[this._stageMarks.length - 1] : 0;
+    return this.surface.strokesDesign().length > since;
   };
 
   Drill.prototype.glancesLeft = function () { return Math.max(0, (this.glanceCap || 0) - (this.glanceCount || 0)); };
@@ -3914,10 +3984,19 @@ window.ATELIER_REFS = [{"id": "ws-lines-1","title": "Straight lines \u2014 set 1
         const tt = this.target.lines.slice().sort((a, b) => angOf(a) - angOf(b));
         r = A.geom.scoreAngles(tt, ut);
       } else if (this.exKey === 'curve') {
-        // pass the raw STROKES — scoreCurve is order-independent, so a curve built
-        // from several overlapping/retraced marks (or with anchor dots) scores by
-        // its shape, not by how the strokes happened to be laid down
-        r = A.geom.scoreCurve(this.target.polyline, strokes);
+        if (this.stageKeys && this._stageMarks && this._stageMarks.length) {
+          // staged construction: chord = the first stage's strokes, the bow =
+          // strokes after the last transition; facets between carry no score
+          const cut = Math.min(this._stageMarks[0], strokes.length);
+          const lastCut = Math.min(this._stageMarks[this._stageMarks.length - 1], strokes.length);
+          const chordStrokes = strokes.slice(0, cut);
+          const roundStrokes = strokes.slice(lastCut);
+          r = A.geom.scoreCurveConstruction(this.target.polyline, chordStrokes,
+                roundStrokes.length ? roundStrokes : strokes);
+        } else {
+          // direct sweep (level >= 7, or a recall): order-independent shape score
+          r = A.geom.scoreCurve(this.target.polyline, strokes);
+        }
       } else if (this.exKey === 'gesture') {
         r = A.geom.scoreCurve(this.target.loa, strokes);
       } else if (this.exKey === 'shade') {
@@ -5248,7 +5327,7 @@ window.ATELIER_REFS = [{"id": "ws-lines-1","title": "Straight lines \u2014 set 1
   const exShort = (type) => exName(type).split(' ')[0].replace(/:$/, '');
   const LOOKCUE = {
     line: 'its slant & length', angles: 'the angles between & the relative lengths',
-    curve: 'its start, end & apex — the furthest point it bows out',
+    curve: 'its endpoints (the chord), where the bend turns, and how far it bows out',
     polygon: 'each corner’s position & the proportions', envelope: 'the outer envelope, then where the contour turns sharply vs flows',
     gesture: 'the line of action — the single sweep from head to foot',
     shade: 'where the light turns to shadow — the terminator\u2019s path across the form',
@@ -5850,6 +5929,7 @@ window.ATELIER_REFS = [{"id": "ws-lines-1","title": "Straight lines \u2014 set 1
   const HOWTO = {
     line: 'Study the single line — its slant and its length. Hide it, then redraw it from memory anywhere on the canvas. Only angle and length are scored, not where you place it.',
     angles: 'Note how the lines relate — the angle between them and their relative lengths — not their position. Reproduce those relationships from memory.',
+    curve: 'Built the atelier way, in stages: study the curve, hide it, then from memory lay the CHORD (the straight between its ends), FACET the bend with straights at its tipping points, and only then ROUND the true curve through your scaffold. The chord and the final bow are scored (30/70) — a leaning chord costs you, because the construction inherits the scaffold’s error. From level 5 the facets are held in your head; from level 7 you commit the curve in one direct sweep.',
     polygon: 'Fix each corner’s position relative to the others. Block the whole shape in, then check its proportion before committing.',
     envelope: 'Find the outer “envelope” first — the largest straight lines that contain the form — then facet into smaller straights and round to the true contour, noticing where the edge turns sharply versus flows. General to specific.',
     gesture: 'A figure is shown as its line of action — one flowing line through the whole pose, with the head and main masses. Memorise that line, then draw it from memory in a single sweep. It’s the rhythm you’re after, not the outline; push the curve a little.',
@@ -6295,12 +6375,16 @@ window.ATELIER_REFS = [{"id": "ws-lines-1","title": "Straight lines \u2014 set 1
           controls.innerHTML = `${T('stepback', ICONS.stepback, 'Step back', { short: 'Step' })}${T('flick', ICONS.flick, 'Flick')}${stringBtn}${measureBtns}${undoBtn}${eraseBtn}${clearBtn}${scoreBtn}`;
         }
       }
-      else if (!def.scored && drill.stages) {     // guided multi-stage block-in
+      else if (drill.stages) {     // guided multi-stage block-in / scored construction
         const last = drill.stage >= drill.stages.length - 1;
-        instr.textContent = `Stage ${drill.stage + 1}/${drill.stages.length} — ${drill.stages[drill.stage]}` + measuring;
-        controls.innerHTML = `${glanceBtn}${measureBtns}${guidesBtn}${flipBtn}${undoBtn}${eraseBtn}${clearBtn}
-          ${last ? '<button class="btn" data-act="evaluate">Reveal</button>'
-                 : '<button class="btn" data-act="nextstage">Next stage ›</button>'}`;
+        const staged = drill.stageHasMarks();   // each stage needs marks before moving on
+        instr.textContent = `Stage ${drill.stage + 1}/${drill.stages.length} — ${drill.stages[drill.stage]}` + (!def.scored ? measuring : '');
+        const tools = def.scored
+          ? `${glanceBtn}${guidesBtn}${undoBtn}${eraseBtn}${clearBtn}`
+          : `${glanceBtn}${measureBtns}${guidesBtn}${flipBtn}${undoBtn}${eraseBtn}${clearBtn}`;
+        controls.innerHTML = `${tools}
+          ${last ? `${def.scored ? newFig : ''}<button class="btn" data-act="evaluate" ${staged && drill.canEvaluate() ? '' : 'disabled'}>${def.scored ? 'Evaluate' : 'Reveal'}</button>`
+                 : `<button class="btn" data-act="nextstage" ${staged ? '' : 'disabled'}>Next stage ›</button>`}`;
       } else {
         instr.textContent = (drill.isRecall
           ? 'Retention check — draw the figure you studied last time, cold.'
@@ -6376,6 +6460,12 @@ window.ATELIER_REFS = [{"id": "ws-lines-1","title": "Straight lines \u2014 set 1
         <div class="metricline"><span>Length error</span><b>${le > 0 ? '+' : ''}${le}% ${le > 0 ? '(long)' : le < 0 ? '(short)' : ''}</b></div>`;
     } else if (drill.exKey === 'curve' || drill.exKey === 'gesture') {
       metricRows = `<div class="metricline"><span>${drill.exKey === 'gesture' ? 'Line-of-action match' : 'Curve match'}</span><b>${Math.round((m.iou || 0) * 100)}%</b></div>`;
+      if (m.construction) {
+        const ca = m.chordAngleErrDeg, cl = m.chordLenErrPct;
+        metricRows = `<div class="metricline"><span>Chord — angle</span><b>${ca == null ? '—' : (ca > 0 ? '+' : '') + ca + '°'}</b></div>
+          <div class="metricline"><span>Chord — length</span><b>${cl == null ? '—' : (cl > 0 ? '+' : '') + cl + '%'}</b></div>
+          <div class="metricline"><span>Bow (final curve)</span><b>${Math.round((m.iou || 0) * 100)}%</b></div>`;
+      }
     } else if (drill.exKey === 'sightsize') {
       // signed placement/size readouts — the exact corrections sight-size trains
       const off = (v, pos, neg) => v > 0 ? `${v}% ${pos}` : v < 0 ? `${-v}% ${neg}` : 'spot on';
@@ -7246,8 +7336,8 @@ window.ATELIER_REFS = [{"id": "ws-lines-1","title": "Straight lines \u2014 set 1
   'use strict';
   // Stamped by build/build.js: A.VERSION from build/version.json, A.BUILD from
   // the build clock (YYMMDD.HHMM). These literals are only the un-built dev fallback.
-  A.VERSION = '1.17.1';
-  A.BUILD = '260808.1717';
+  A.VERSION = '1.18.0';
+  A.BUILD = '260808.1731';
   function boot() {
     try { A.ui.init(); }
     catch (e) {

@@ -518,6 +518,26 @@
     return { score, iou: +(score / 100).toFixed(3), metrics: { iou: +(score / 100).toFixed(3), dev: +dev.toFixed(4) } };
   };
 
+  /* ---- staged curve construction (the atelier way) ------------------------
+     Chord and final bow are the two measurable stages; the facets between are
+     working marks with no unique right answer, so they carry no score — their
+     quality shows up in the bow. Blend 30/70: a leaning chord costs you, which
+     is the classical lesson (the construction inherits the scaffold's error). */
+  geom.scoreCurveConstruction = function (targetPolyline, chordStrokes, roundStrokes) {
+    const T = targetPolyline;
+    const tChord = [T[0], T[T.length - 1]];
+    const pts = [];
+    for (const s of (chordStrokes || [])) for (const p of s) pts.push(p);
+    const c = pts.length >= 2 ? geom.scoreLine(tChord, geom.bestFitSegment(pts))
+                              : { score: 0, metrics: { degenerate: true } };
+    const r = geom.scoreCurve(T, roundStrokes);
+    const score = Math.round(0.3 * c.score + 0.7 * r.score);
+    return { score, iou: r.iou, metrics: Object.assign({}, r.metrics, {
+      construction: true, chordScore: c.score, roundScore: r.score,
+      chordAngleErrDeg: c.metrics.angleErrDeg != null ? c.metrics.angleErrDeg : null,
+      chordLenErrPct: c.metrics.lengthErrPct != null ? c.metrics.lengthErrPct : null }) };
+  };
+
   /* FIXED-POSITION variant: no alignment — where the curve sits matters (the
      terminator drill). Same order-independent point-to-path distance, scaled by
      scaleRef (the form's radius).                                             */

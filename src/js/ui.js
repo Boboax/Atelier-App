@@ -29,7 +29,7 @@
   const exShort = (type) => exName(type).split(' ')[0].replace(/:$/, '');
   const LOOKCUE = {
     line: 'its slant & length', angles: 'the angles between & the relative lengths',
-    curve: 'its start, end & apex — the furthest point it bows out',
+    curve: 'its endpoints (the chord), where the bend turns, and how far it bows out',
     polygon: 'each corner’s position & the proportions', envelope: 'the outer envelope, then where the contour turns sharply vs flows',
     gesture: 'the line of action — the single sweep from head to foot',
     shade: 'where the light turns to shadow — the terminator\u2019s path across the form',
@@ -631,6 +631,7 @@
   const HOWTO = {
     line: 'Study the single line — its slant and its length. Hide it, then redraw it from memory anywhere on the canvas. Only angle and length are scored, not where you place it.',
     angles: 'Note how the lines relate — the angle between them and their relative lengths — not their position. Reproduce those relationships from memory.',
+    curve: 'Built the atelier way, in stages: study the curve, hide it, then from memory lay the CHORD (the straight between its ends), FACET the bend with straights at its tipping points, and only then ROUND the true curve through your scaffold. The chord and the final bow are scored (30/70) — a leaning chord costs you, because the construction inherits the scaffold’s error. From level 5 the facets are held in your head; from level 7 you commit the curve in one direct sweep.',
     polygon: 'Fix each corner’s position relative to the others. Block the whole shape in, then check its proportion before committing.',
     envelope: 'Find the outer “envelope” first — the largest straight lines that contain the form — then facet into smaller straights and round to the true contour, noticing where the edge turns sharply versus flows. General to specific.',
     gesture: 'A figure is shown as its line of action — one flowing line through the whole pose, with the head and main masses. Memorise that line, then draw it from memory in a single sweep. It’s the rhythm you’re after, not the outline; push the curve a little.',
@@ -1076,12 +1077,16 @@
           controls.innerHTML = `${T('stepback', ICONS.stepback, 'Step back', { short: 'Step' })}${T('flick', ICONS.flick, 'Flick')}${stringBtn}${measureBtns}${undoBtn}${eraseBtn}${clearBtn}${scoreBtn}`;
         }
       }
-      else if (!def.scored && drill.stages) {     // guided multi-stage block-in
+      else if (drill.stages) {     // guided multi-stage block-in / scored construction
         const last = drill.stage >= drill.stages.length - 1;
-        instr.textContent = `Stage ${drill.stage + 1}/${drill.stages.length} — ${drill.stages[drill.stage]}` + measuring;
-        controls.innerHTML = `${glanceBtn}${measureBtns}${guidesBtn}${flipBtn}${undoBtn}${eraseBtn}${clearBtn}
-          ${last ? '<button class="btn" data-act="evaluate">Reveal</button>'
-                 : '<button class="btn" data-act="nextstage">Next stage ›</button>'}`;
+        const staged = drill.stageHasMarks();   // each stage needs marks before moving on
+        instr.textContent = `Stage ${drill.stage + 1}/${drill.stages.length} — ${drill.stages[drill.stage]}` + (!def.scored ? measuring : '');
+        const tools = def.scored
+          ? `${glanceBtn}${guidesBtn}${undoBtn}${eraseBtn}${clearBtn}`
+          : `${glanceBtn}${measureBtns}${guidesBtn}${flipBtn}${undoBtn}${eraseBtn}${clearBtn}`;
+        controls.innerHTML = `${tools}
+          ${last ? `${def.scored ? newFig : ''}<button class="btn" data-act="evaluate" ${staged && drill.canEvaluate() ? '' : 'disabled'}>${def.scored ? 'Evaluate' : 'Reveal'}</button>`
+                 : `<button class="btn" data-act="nextstage" ${staged ? '' : 'disabled'}>Next stage ›</button>`}`;
       } else {
         instr.textContent = (drill.isRecall
           ? 'Retention check — draw the figure you studied last time, cold.'
@@ -1157,6 +1162,12 @@
         <div class="metricline"><span>Length error</span><b>${le > 0 ? '+' : ''}${le}% ${le > 0 ? '(long)' : le < 0 ? '(short)' : ''}</b></div>`;
     } else if (drill.exKey === 'curve' || drill.exKey === 'gesture') {
       metricRows = `<div class="metricline"><span>${drill.exKey === 'gesture' ? 'Line-of-action match' : 'Curve match'}</span><b>${Math.round((m.iou || 0) * 100)}%</b></div>`;
+      if (m.construction) {
+        const ca = m.chordAngleErrDeg, cl = m.chordLenErrPct;
+        metricRows = `<div class="metricline"><span>Chord — angle</span><b>${ca == null ? '—' : (ca > 0 ? '+' : '') + ca + '°'}</b></div>
+          <div class="metricline"><span>Chord — length</span><b>${cl == null ? '—' : (cl > 0 ? '+' : '') + cl + '%'}</b></div>
+          <div class="metricline"><span>Bow (final curve)</span><b>${Math.round((m.iou || 0) * 100)}%</b></div>`;
+      }
     } else if (drill.exKey === 'sightsize') {
       // signed placement/size readouts — the exact corrections sight-size trains
       const off = (v, pos, neg) => v > 0 ? `${v}% ${pos}` : v < 0 ? `${-v}% ${neg}` : 'spot on';
