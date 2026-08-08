@@ -200,3 +200,41 @@ test('guideDropped names the support each level-up removes (auto only)', () => {
   assert.equal(A.curr.guideDropped('line', 2, 'on'), '', 'not when guides are pinned on');
   assert.equal(A.curr.guideDropped('bargue', 2, 'auto'), '', 'bargue keeps its scaffolds');
 });
+
+// data repair: attempts hit by the ordered-path scoring bugs (a faithful curve
+// built from dots/overlapping strokes scored 0) are rescored from their stored
+// target+strokes, and the promotion window is rebuilt from corrected history
+test('repairOpenCurveScores: rescues bug victims, leaves honest scores alone', () => {
+  const { A } = freshEnv(LOGIC);
+  const T = [[0.15, 0.4], [0.35, 0.72], [0.5, 0.82], [0.65, 0.72], [0.85, 0.4]];
+  const copy = T.map((p) => [p[0] + 0.008, p[1] + 0.008]);
+  const dots = [[[0.15, 0.4], [0.151, 0.401]], [[0.5, 0.82], [0.501, 0.821]]];
+  const straight = [[[0.15, 0.4], [0.85, 0.4]]];
+  const att = (id, ts, score, strokes, extra) => Object.assign(
+    { id, ts, day: '2026-07-1' + (id % 9), type: 'curve', scored: true,
+      target: { polyline: T }, strokes, score, metrics: {}, repeat: false, recall: false, glances: 0 }, extra);
+  const attempts = [
+    att(1, 1000, 0, dots.concat([copy])),                    // bug victim: dots + faithful copy scored 0
+    att(2, 2000, 0, [copy.slice(2, 5), copy.slice(0, 3), copy.slice(3)]), // bug victim: overlapping strokes
+    att(3, 3000, 12, straight, {}),                          // honestly bad — must NOT be inflated
+    att(4, 4000, 91, [copy], { selfEstimate: 80 }),          // already fine
+    att(5, 5000, 0, dots.concat([copy]), { glances: 2 }),    // victim but glanced → rescored, excluded from window
+  ];
+  const r = A.curr.repairOpenCurveScores(attempts);
+  const ids = r.updates.map((u) => u.id).sort();
+  assert.deepEqual(ids, [1, 2, 5], 'exactly the bug victims are corrected');
+  for (const u of r.updates) assert.ok(u.score >= 85, 'rescored to the true value: ' + u.score);
+  // window rebuilt from genuine attempts only (no glanced #5), corrected values in place
+  const w = r.windows.curve.map((x) => x.s);
+  assert.equal(w.length, 4);
+  assert.ok(w[0] >= 85 && w[1] >= 85, 'corrected scores enter the window');
+  assert.equal(w[2], 12, 'the honest low score stays');
+  assert.equal(w[3], 91);
+  // applying writes the window + resets the staircase pace
+  A.curr.recordScore('curve', 95, '2026-07-01');   // put some pace state in place first
+  A.curr.applyRepairWindows(r.windows);
+  assert.deepEqual(A.curr.window('curve').map((x) => x.s), w);
+  assert.equal(A.curr.studySeconds('curve'), A.curr.def('curve').study(1), 'pace back to neutral');
+  // nothing to repair → empty plan
+  assert.deepEqual(A.curr.repairOpenCurveScores([att(9, 1, 90, [copy])]).updates, []);
+});

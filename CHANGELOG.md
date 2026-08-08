@@ -19,6 +19,10 @@ No feature reaches `main` without a version bump.
 
 ---
 
+## 1.17.1 — Repairing the mis-scored curves
+
+The ordered-path scoring bugs (fixed in 1.14.2 and 1.16.1) left their damage behind: bogus zeros sitting in attempt history and, worse, in the curve/gesture/terminator **promotion windows** — blocking level-ups and relaxing the difficulty staircase. Every attempt stores its target and strokes, so the ground truth survived. On first launch this version **rescores those attempts with the fixed scorer**, corrects any that were materially unfair (>10 points low), recomputes their self-estimate gaps, rebuilds the affected promotion windows from corrected history, and resets the study-clock staircase to neutral. Honest low scores are left exactly as they were — only bug victims are touched. One-time, per profile, with a toast reporting what was repaired.
+
 ## 1.17.0 — Guides fade in stages
 
 The sighting scaffolds used to vanish all at once at level 4 — the thirds grid, the angle clock *and* the plumb line & horizon — in the very same step the study clock became an enforced countdown. That's a cliff, and it stacked two desirable difficulties in one moment; the scaffolding literature (and the guidance hypothesis behind fading feedback) says supports should be withdrawn one at a time. They now come away in order of crudeness, one per level:

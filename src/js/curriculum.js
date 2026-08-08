@@ -193,6 +193,62 @@
       return { changed, dir, level: st.level, pending };
     },
 
+    /* ---- data repair: mis-scored open curves (bugs fixed in 1.14.2/1.16.1) --
+       Curve/gesture/terminator scoring used to read the marks as one ordered
+       path, so drawings built from dots or several overlapping strokes could
+       score 0 despite being faithful. Every attempt stores its target AND the
+       strokes, so the ground truth survived — rescore them with the current
+       order-independent scorer and, where the old score was materially unfair
+       (>10 pts low), correct the record and rebuild that drill's promotion
+       window from its last 5 genuine attempts. Pure: returns the plan, does
+       not write (storage/UI apply it). */
+    repairOpenCurveScores(attempts) {
+      const RESCORE = {
+        curve:   (t, s) => t && t.polyline && A.geom.scoreCurve(t.polyline, s),
+        gesture: (t, s) => t && t.loa && A.geom.scoreCurve(t.loa, s),
+        shade:   (t, s) => t && t.polyline && t.form &&
+                           A.geom.scoreCurveFixed(t.polyline, s, Math.max(t.form.rx || 0, t.form.ry || 0) * 2)
+      };
+      const updates = [], byId = {};
+      for (const a of attempts) {
+        const f = RESCORE[a.type];
+        if (!f || !a.scored || a.id == null || !a.target || !a.strokes || !a.strokes.length) continue;
+        let r = null;
+        try { r = f(a.target, a.strokes); } catch (e) { /* malformed old record — leave it */ }
+        if (!r || !(r.score > (a.score || 0) + 10)) continue;
+        const u = { id: a.id, type: a.type, score: r.score,
+                    metrics: Object.assign({}, a.metrics, { iou: r.iou, dev: r.metrics && r.metrics.dev, rescored: true }) };
+        if (a.selfEstimate != null) {
+          u.estErr = Math.abs(a.selfEstimate - r.score);
+          u.estBias = a.selfEstimate - r.score;
+        }
+        updates.push(u); byId[a.id] = u;
+      }
+      if (!updates.length) return { updates: [], windows: {} };
+      // rebuild each affected drill's window from its corrected genuine history
+      const windows = {};
+      for (const key of Array.from(new Set(updates.map((u) => u.type)))) {
+        const genuine = attempts
+          .filter((a) => a.type === key && a.scored && !a.repeat && !a.recall && !a.finisher && !(a.glances > 0))
+          .sort((p, q) => (p.ts || 0) - (q.ts || 0))
+          .slice(-WINDOW)
+          .map((a) => ({ s: byId[a.id] ? byId[a.id].score : a.score, d: a.day || '' }));
+        windows[key] = genuine;
+      }
+      return { updates, windows };
+    },
+    // write the rebuilt windows into curriculum state; pace back to neutral
+    // (the bogus low scores had relaxed the staircase too)
+    applyRepairWindows(windows) {
+      const s = this._state();
+      for (const key of Object.keys(windows)) {
+        const st = s[key] || (s[key] = { level: 1, window: [] });
+        st.window = windows[key];
+        st.pace = 1;
+      }
+      this._save(s);
+    },
+
     // a cold retention check reported back: success unlocks a pending promotion
     // and expands the next recall lag; a clear failure contracts the schedule
     noteRecall(key, score, day) {

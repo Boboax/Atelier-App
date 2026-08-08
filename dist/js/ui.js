@@ -67,7 +67,30 @@
     await A.library.init();
     ui.go('home');
     if (!A.store.get('onboarded', false)) showOnboarding();
+    runRepairs();
   };
+
+  // one-time data repairs, per profile, after boot (fire-and-forget: the app
+  // must never fail to start because a repair did)
+  async function runRepairs() {
+    try {
+      if (A.store.get('repairCurves1171', false)) return;
+      const all = await A.store.allAttempts();
+      const r = A.curr.repairOpenCurveScores(all);
+      for (const u of r.updates) {
+        const patch = { score: u.score, metrics: u.metrics };
+        if (u.estErr != null) { patch.estErr = u.estErr; patch.estBias = u.estBias; }
+        await A.store.patchAttempt(u.id, patch);
+      }
+      A.curr.applyRepairWindows(r.windows);
+      A.store.set('repairCurves1171', true);
+      if (r.updates.length) {
+        invalidate();
+        if (ui.view === 'home') ui.go('home');
+        toast('Repaired ' + r.updates.length + ' curve score' + (r.updates.length > 1 ? 's' : '') + ' hit by an old scoring bug — level windows rebuilt.');
+      }
+    } catch (e) { /* repairs retry next launch (flag stays unset) */ }
+  }
   function navBtn(id, ic, label) { return `<button data-nav="${id}" aria-label="${label}"><span class="ic">${ic}</span>${label}</button>`; }
   // drawn stroke icons (currentColor) — font glyphs render as emoji/tofu on some stacks
   const I = (d) => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${d}</svg>`;
